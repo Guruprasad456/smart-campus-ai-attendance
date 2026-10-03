@@ -16,6 +16,8 @@ Open `http://127.0.0.1:8501`.
 2. Install the Microsoft **Python** extension if VS Code asks.
 3. Press **F5** and choose **Run Smart Campus**. The included VS Code settings use your Anaconda Python automatically.
 
+Do not run `./.venv/Scripts/python.exe` for this project: that old environment is incomplete. Use the Anaconda command below or **Terminal → Run Task → Run Smart Campus**.
+
 You can also open the VS Code terminal and run:
 
 ```powershell

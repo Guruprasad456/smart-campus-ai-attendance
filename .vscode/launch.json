@@ -5,6 +5,7 @@
       "name": "Run Smart Campus",
       "type": "debugpy",
       "request": "launch",
+      "python": "C:\\Users\\LAPPY HUB\\anaconda3\\python.exe",
       "module": "streamlit",
       "args": [
         "run",
