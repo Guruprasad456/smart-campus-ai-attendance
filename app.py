@@ -3,8 +3,12 @@ import os
 import pickle
 import hashlib
 import threading
+import sqlite3
+import smtplib
+import json
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime
+from email.message import EmailMessage
 
 import numpy as np
 import pandas as pd
@@ -37,7 +41,8 @@ except BaseException as e:
 
 FACE_TOLERANCE = 0.5      # lower = stricter matching (0.45 strict, 0.55 relaxed)
 MAX_IMAGE_SIDE = 800      # one student's close-up photo -> small size is enough (fast)
-DATA_FILE = "campus_data.pkl"
+DATA_FILE = "campus_data.pkl"  # Legacy data file; imported once into SQLite if present.
+DB_FILE = "campus_data.db"
 
 DEPARTMENTS = ["AIDS", "CSE", "IT", "E&TC", "Civil", "Mechanical"]
 CLASSES = ["FY B.Tech", "SY B.Tech", "TY B.Tech", "Final Year B.Tech"]
@@ -107,26 +112,194 @@ def hash_pw(p):
 
 
 PERSIST_KEYS = ["students_db", "faculty_db", "attendance_logs", "lecture_logs",
-                "sms_outbox", "att_session", "sms_config"]
+                "sms_outbox", "att_session"]
+
+
+class CampusStorage:
+    """Local SQLite storage for students, attendance, and notification history.
+
+    The app keeps its current session lists for a responsive Streamlit UI and
+    saves their contents into normalized SQLite tables after every change.
+    """
+
+    def __init__(self, path=DB_FILE):
+        self.path = path
+        self._create_tables()
+        self._migrate_legacy_pickle()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _create_tables(self):
+        with self._connect() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS students (
+                    department TEXT NOT NULL, class_name TEXT NOT NULL,
+                    division TEXT NOT NULL, roll_no TEXT NOT NULL,
+                    name TEXT NOT NULL, mobile TEXT, parent_mobile TEXT NOT NULL,
+                    parent_email TEXT, photo BLOB, encoding BLOB,
+                    PRIMARY KEY (department, class_name, division, roll_no)
+                );
+                CREATE TABLE IF NOT EXISTS faculty (
+                    username TEXT PRIMARY KEY, name TEXT NOT NULL,
+                    mobile TEXT, password_hash TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS attendance_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, faculty TEXT,
+                    class_name TEXT, division TEXT, roll_no TEXT, name TEXT,
+                    department TEXT, date TEXT, time TEXT, slot TEXT,
+                    status TEXT, method TEXT, parent_mobile TEXT, parent_email TEXT
+                );
+                CREATE TABLE IF NOT EXISTS lecture_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, faculty TEXT,
+                    class_name TEXT, division TEXT, department TEXT,
+                    date TEXT, slot TEXT, total INTEGER, present INTEGER, absent INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS notification_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, channel TEXT,
+                    recipient TEXT, student TEXT, type TEXT, message TEXT, status TEXT
+                );
+                CREATE TABLE IF NOT EXISTS app_state (
+                    key TEXT PRIMARY KEY, value BLOB
+                );
+            """)
+
+    def _is_empty(self):
+        with self._connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 0 and \
+                conn.execute("SELECT COUNT(*) FROM faculty").fetchone()[0] == 0
+
+    def _migrate_legacy_pickle(self):
+        """Import the original campus_data.pkl one time, without overwriting SQLite."""
+        if not self._is_empty() or not os.path.exists(DATA_FILE):
+            return
+        try:
+            with open(DATA_FILE, "rb") as file:
+                legacy = pickle.load(file)
+            if isinstance(legacy, dict):
+                self.save(legacy)
+        except Exception:
+            # A corrupt legacy file should never prevent the new app from opening.
+            pass
+
+    @staticmethod
+    def _blob(value):
+        return sqlite3.Binary(pickle.dumps(value)) if value is not None else None
+
+    @staticmethod
+    def _unblob(value):
+        if value is None:
+            return None
+        try:
+            return pickle.loads(value)
+        except Exception:
+            return None
+
+    def load(self):
+        with self._connect() as conn:
+            students = []
+            for row in conn.execute("SELECT * FROM students ORDER BY department, class_name, division, roll_no"):
+                students.append({
+                    "roll_no": row["roll_no"], "name": row["name"], "department": row["department"],
+                    "class_name": row["class_name"], "division": row["division"], "mobile": row["mobile"] or "",
+                    "parent_mobile": row["parent_mobile"] or "", "parent_email": row["parent_email"] or "",
+                    "photo": row["photo"], "encoding": self._unblob(row["encoding"]),
+                })
+            faculty = [dict(row) for row in conn.execute("SELECT * FROM faculty ORDER BY name")]
+            attendance = [dict(row) for row in conn.execute(
+                "SELECT faculty, class_name, division, roll_no, name, department, date, time, slot, status, method, parent_mobile, parent_email FROM attendance_logs ORDER BY id")]
+            lectures = [dict(row) for row in conn.execute(
+                "SELECT faculty, class_name, division, department, date, slot, total, present, absent FROM lecture_logs ORDER BY id")]
+            notifications = []
+            for row in conn.execute("SELECT time, channel, recipient, student, type, message, status FROM notification_logs ORDER BY id"):
+                item = dict(row)
+                item["to"] = item["recipient"]  # compatibility with earlier in-memory outbox rows
+                notifications.append(item)
+            state = conn.execute("SELECT value FROM app_state WHERE key = 'att_session'").fetchone()
+            att_session = self._unblob(state["value"]) if state else None
+            return {
+                "students_db": students, "faculty_db": faculty, "attendance_logs": attendance,
+                "lecture_logs": lectures, "sms_outbox": notifications, "att_session": att_session,
+            }
+
+    def save(self, data):
+        students = data.get("students_db", []) or []
+        faculty = data.get("faculty_db", []) or []
+        attendance = data.get("attendance_logs", []) or []
+        lectures = data.get("lecture_logs", []) or []
+        notifications = data.get("sms_outbox", []) or []
+        with self._connect() as conn:
+            conn.execute("DELETE FROM students")
+            conn.executemany("""
+                INSERT INTO students (department, class_name, division, roll_no, name, mobile, parent_mobile, parent_email, photo, encoding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [(
+                s.get("department", ""), s.get("class_name", ""), s.get("division", ""), s.get("roll_no", ""),
+                s.get("name", ""), s.get("mobile", ""), s.get("parent_mobile", ""), s.get("parent_email", ""),
+                sqlite3.Binary(s["photo"]) if s.get("photo") is not None else None, self._blob(s.get("encoding")),
+            ) for s in students])
+
+            conn.execute("DELETE FROM faculty")
+            conn.executemany("INSERT INTO faculty (username, name, mobile, password_hash) VALUES (?, ?, ?, ?)", [(
+                f.get("username", ""), f.get("name", ""), f.get("mobile", ""),
+                f.get("password_hash", hash_pw(f.get("password", ""))),
+            ) for f in faculty])
+
+            conn.execute("DELETE FROM attendance_logs")
+            conn.executemany("""
+                INSERT INTO attendance_logs (faculty, class_name, division, roll_no, name, department, date, time, slot, status, method, parent_mobile, parent_email)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [(
+                row.get("faculty", ""), row.get("class_name", ""), row.get("division", ""), row.get("roll_no", ""),
+                row.get("name", ""), row.get("department", ""), row.get("date", ""), row.get("time", ""),
+                row.get("slot", ""), row.get("status", ""), row.get("method", ""),
+                row.get("parent_mobile", ""), row.get("parent_email", ""),
+            ) for row in attendance])
+
+            conn.execute("DELETE FROM lecture_logs")
+            conn.executemany("""
+                INSERT INTO lecture_logs (faculty, class_name, division, department, date, slot, total, present, absent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [(
+                row.get("faculty", ""), row.get("class_name", ""), row.get("division", ""), row.get("department", ""),
+                row.get("date", ""), row.get("slot", ""), row.get("total", 0), row.get("present", 0), row.get("absent", 0),
+            ) for row in lectures])
+
+            conn.execute("DELETE FROM notification_logs")
+            conn.executemany("""
+                INSERT INTO notification_logs (time, channel, recipient, student, type, message, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [(
+                row.get("time", ""), row.get("channel", "Notification"), row.get("recipient", row.get("to", "")),
+                row.get("student", ""), row.get("type", ""), row.get("message", ""), row.get("status", ""),
+            ) for row in notifications])
+
+            conn.execute("DELETE FROM app_state WHERE key = 'att_session'")
+            session = data.get("att_session")
+            if session is not None:
+                conn.execute("INSERT INTO app_state (key, value) VALUES ('att_session', ?)", (self._blob(session),))
+
+
+@st.cache_resource
+def get_storage():
+    return CampusStorage()
 
 
 def save_data():
-    """Save everything to disk so data is NOT lost when the page refreshes."""
+    """Persist all student and attendance data to the local SQLite database."""
     try:
-        with open(DATA_FILE, "wb") as f:
-            pickle.dump({k: st.session_state.get(k) for k in PERSIST_KEYS}, f)
+        get_storage().save({key: st.session_state.get(key) for key in PERSIST_KEYS})
     except Exception as e:
         st.warning(f"Could not save local data: {e}")
 
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "rb") as f:
-                return pickle.load(f)
-        except Exception:
-            return {}
-    return {}
+    try:
+        return get_storage().load()
+    except Exception:
+        return {}
 
 
 def show_df(df):
@@ -165,29 +338,25 @@ def get_single_face_encoding(img_bytes):
 
 
 # ---------------------------------------------------------
-# SMS engine: fast (parallel, background threads) + auto retry
-# Message text is fixed as requested by the Principal.
+# Parent notification engine: WhatsApp through Twilio and email through SMTP.
+# No messages are sent unless the corresponding credentials are configured.
 # ---------------------------------------------------------
-SIGNATURE = "Principal\nSTC Latur"
-
-
-def build_sms(status):
-    word = "absent" if status == "Absent" else "present"
-    return f"Dear Parent,\nYour child is {word} for Today's Lecture.\n\n{SIGNATURE}"
-
-
 @st.cache_resource
-def sms_runtime():
+def notification_runtime():
     """Shared worker pool + result box (survives Streamlit reruns)."""
     return {"pool": ThreadPoolExecutor(max_workers=8), "results": [], "lock": threading.Lock()}
 
 
-SMS_KEYS = ["SMS_PROVIDER", "FAST2SMS_API_KEY", "FAST2SMS_ROUTE", "FAST2SMS_SENDER_ID",
-            "FAST2SMS_TEMPLATE_ABSENT", "FAST2SMS_TEMPLATE_PRESENT", "GATEWAY_URL", "GATEWAY_TOKEN"]
+NOTIFICATION_KEYS = [
+    "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM",
+    "TWILIO_CONTENT_SID",
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "SMTP_USE_SSL",
+]
 
 
-def get_sms_config():
-    cfg = {k: "" for k in SMS_KEYS}
+def get_notification_config():
+    """Read notification credentials from Streamlit secrets or environment variables."""
+    cfg = {key: os.environ.get(key, "") for key in NOTIFICATION_KEYS}
     # Do not access st.secrets when no file exists: Streamlit renders a noisy
     # missing-secrets diagnostic even if the exception is handled.
     secrets_paths = [
@@ -196,125 +365,161 @@ def get_sms_config():
     ]
     if any(os.path.exists(path) for path in secrets_paths):
         try:
-            for k in SMS_KEYS:
-                cfg[k] = str(st.secrets.get(k, "") or "")
+            for key in NOTIFICATION_KEYS:
+                cfg[key] = str(st.secrets.get(key, cfg[key]) or "")
         except Exception:
             pass
-    # A principal can configure a local gateway from the Admin Panel. Secrets
-    # take precedence so deployments can keep credentials outside this file.
-    for key, value in st.session_state.get("sms_config", {}).items():
-        if key in cfg and not cfg[key]:
-            cfg[key] = str(value or "")
-    if not cfg["SMS_PROVIDER"]:
-        cfg["SMS_PROVIDER"] = "fast2sms" if cfg["FAST2SMS_API_KEY"] else "none"
-    cfg["SMS_PROVIDER"] = cfg["SMS_PROVIDER"].lower()
     return cfg
 
 
-def _api_err(r):
-    """Short readable error text from the SMS provider's response."""
+def enabled_notification_channels(cfg=None):
+    cfg = cfg or get_notification_config()
+    channels = []
+    if all(cfg[key].strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM")):
+        channels.append("WhatsApp")
+    if all(cfg[key].strip() for key in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL")):
+        channels.append("Email")
+    return channels
+
+
+def build_absence_notification(student, session):
+    return (
+        f"Dear Parent,\n\n"
+        f"Attendance alert: {student['name']} (Roll No. {student['roll_no']}) was marked ABSENT.\n"
+        f"Class: {session['department']} - {session['class_name']} - {session['division']}\n"
+        f"Lecture: {session['slot']} on {session['date']}\n\n"
+        f"Please contact the college office if this record is incorrect.\n\n"
+        f"Sandipani Technical Campus, Kolpa"
+    )
+
+
+def _record_notification(channel, recipient, student_name, kind, message, status):
+    runtime = notification_runtime()
+    entry = {
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "channel": channel,
+        "recipient": recipient, "to": recipient, "student": student_name,
+        "type": kind, "message": message, "status": status,
+    }
+    with runtime["lock"]:
+        runtime["results"].append(entry)
+    return status
+
+
+def _normalize_indian_number(mobile):
+    digits = "".join(character for character in str(mobile) if character.isdigit())
+    if len(digits) == 10:
+        return "+91" + digits
+    if len(digits) >= 11 and digits.startswith("91"):
+        return "+" + digits
+    return ""
+
+
+def _deliver_notification(channel, recipient, message, student_name, kind, cfg, template_variables=None):
+    """Deliver one WhatsApp or email notification in a background worker."""
+    status = "Failed"
     try:
-        m = r.json().get("message", "")
-        return " ".join(m) if isinstance(m, list) else str(m)[:100]
-    except Exception:
-        return r.text[:100]
-
-
-def _deliver(rt, cfg, mobile, message, status_word, student_name):
-    """Runs in a background thread (no st.* calls here!)."""
-    provider = cfg["SMS_PROVIDER"]
-    if provider == "none":
-        status = "Logged (SMS gateway not configured)"
-    else:
-        import requests
-        status = "Failed"
-        for _ in range(2):                       # one automatic retry
-            try:
-                if provider == "fast2sms":
-                    route = (cfg["FAST2SMS_ROUTE"] or "dlt").lower()
-                    data = {"route": route, "numbers": mobile, "flash": "0"}
-                    if route == "dlt":           # DLT registered template (sender header like STCLTR)
-                        data["sender_id"] = cfg["FAST2SMS_SENDER_ID"]
-                        data["message"] = cfg["FAST2SMS_TEMPLATE_ABSENT"] if status_word == "Absent" \
-                            else cfg["FAST2SMS_TEMPLATE_PRESENT"]
-                    else:                        # "q" quick route: free text
-                        data["message"] = message
-                    r = requests.post("https://www.fast2sms.com/dev/bulkV2",
-                                      headers={"authorization": cfg["FAST2SMS_API_KEY"]},
-                                      data=data, timeout=15)
-                    ok = r.ok and bool(r.json().get("return", False))
-                elif provider == "android":      # SMS-gateway app on the Principal's own phone
-                    to = mobile if mobile.startswith("+") else "+91" + mobile
-                    r = requests.post(cfg["GATEWAY_URL"], json={"to": to, "message": message},
-                                      headers={"Authorization": cfg["GATEWAY_TOKEN"]}, timeout=15)
-                    ok = r.ok
-                else:
-                    status = "Failed (unknown SMS_PROVIDER)"
-                    break
-                if ok:
-                    status = "Sent"
-                    break
-                status = f"Failed ({r.status_code}: {_api_err(r)})"
-            except Exception as e:
-                status = f"Failed ({type(e).__name__})"
-    entry = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "to": mobile,
-             "student": student_name, "type": status_word, "message": message, "status": status}
-    with rt["lock"]:
-        rt["results"].append(entry)
-    return status
-
-
-def queue_sms(mobile, status_word, student_name=""):
-    """Send immediately in the background (does not block the screen). Returns a Future."""
-    rt = sms_runtime()
-    return rt["pool"].submit(_deliver, rt, get_sms_config(), mobile,
-                             build_sms(status_word), status_word, student_name)
-
-
-def _deliver_daily_summary(rt, cfg, mobile, message, student_name):
-    """Deliver a custom daily summary where the configured gateway supports free text."""
-    provider = cfg["SMS_PROVIDER"]
-    if provider == "none":
-        status = "Logged (SMS gateway not configured)"
-    else:
-        try:
+        if channel == "WhatsApp":
             import requests
-            if provider == "fast2sms":
-                route = (cfg["FAST2SMS_ROUTE"] or "dlt").lower()
-                if route == "dlt":
-                    status = "Skipped (a DLT daily-summary template is required)"
-                else:
-                    r = requests.post("https://www.fast2sms.com/dev/bulkV2",
-                                      headers={"authorization": cfg["FAST2SMS_API_KEY"]},
-                                      data={"route": route, "numbers": mobile, "message": message, "flash": "0"},
-                                      timeout=15)
-                    status = "Sent" if r.ok and bool(r.json().get("return", False)) else \
-                        f"Failed ({r.status_code}: {_api_err(r)})"
-            elif provider == "android":
-                to = mobile if mobile.startswith("+") else "+91" + mobile
-                r = requests.post(cfg["GATEWAY_URL"], json={"to": to, "message": message},
-                                  headers={"Authorization": cfg["GATEWAY_TOKEN"]}, timeout=15)
-                status = "Sent" if r.ok else f"Failed ({r.status_code}: {_api_err(r)})"
+            target = _normalize_indian_number(recipient)
+            sender = cfg["TWILIO_WHATSAPP_FROM"].strip()
+            sender = sender if sender.startswith("whatsapp:") else f"whatsapp:{sender}"
+            data = {"From": sender, "To": f"whatsapp:{target}"}
+            # A free-form message is accepted in a current WhatsApp conversation or
+            # Twilio Sandbox. Configure an approved template for scheduled alerts
+            # that may be sent outside WhatsApp's 24-hour customer-service window.
+            if cfg["TWILIO_CONTENT_SID"].strip():
+                data["ContentSid"] = cfg["TWILIO_CONTENT_SID"].strip()
+                if template_variables:
+                    data["ContentVariables"] = json.dumps(template_variables)
             else:
-                status = "Failed (unknown SMS_PROVIDER)"
-        except Exception as e:
-            status = f"Failed ({type(e).__name__})"
-    entry = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "to": mobile,
-             "student": student_name, "type": "Daily Summary", "message": message, "status": status}
-    with rt["lock"]:
-        rt["results"].append(entry)
-    return status
+                data["Body"] = message
+            response = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{cfg['TWILIO_ACCOUNT_SID']}/Messages.json",
+                auth=(cfg["TWILIO_ACCOUNT_SID"], cfg["TWILIO_AUTH_TOKEN"]),
+                data=data, timeout=20,
+            )
+            if response.ok:
+                status = "Queued with WhatsApp"
+            else:
+                status = f"Failed ({response.status_code}: {response.text[:120]})"
+        elif channel == "Email":
+            email = EmailMessage()
+            email["Subject"] = "Attendance Alert: Student marked absent"
+            email["From"] = cfg["SMTP_FROM_EMAIL"]
+            email["To"] = recipient
+            email.set_content(message)
+            port = int(cfg["SMTP_PORT"] or 587)
+            if str(cfg["SMTP_USE_SSL"]).lower() in ("1", "true", "yes") or port == 465:
+                with smtplib.SMTP_SSL(cfg["SMTP_HOST"], port, timeout=20) as smtp:
+                    smtp.login(cfg["SMTP_USERNAME"], cfg["SMTP_PASSWORD"])
+                    smtp.send_message(email)
+            else:
+                with smtplib.SMTP(cfg["SMTP_HOST"], port, timeout=20) as smtp:
+                    smtp.ehlo()
+                    smtp.starttls()
+                    smtp.ehlo()
+                    smtp.login(cfg["SMTP_USERNAME"], cfg["SMTP_PASSWORD"])
+                    smtp.send_message(email)
+            status = "Email sent"
+        else:
+            status = "Failed (unsupported channel)"
+    except Exception as error:
+        status = f"Failed ({type(error).__name__})"
+    return _record_notification(channel, recipient, student_name, kind, message, status)
 
 
-def queue_daily_summary(mobile, message, student_name=""):
-    """Queue an end-of-day attendance summary without blocking the interface."""
-    rt = sms_runtime()
-    return rt["pool"].submit(_deliver_daily_summary, rt, get_sms_config(), mobile, message, student_name)
+def queue_absence_notifications(student, session):
+    """Queue absence alerts only. Returns background worker futures."""
+    cfg = get_notification_config()
+    message = build_absence_notification(student, session)
+    channels = enabled_notification_channels(cfg)
+    futures = []
+    if not channels:
+        _record_notification("Not configured", "", student["name"], "Absent", message,
+                             "Not sent: configure WhatsApp or email credentials")
+        return futures
+
+    runtime = notification_runtime()
+    if "WhatsApp" in channels:
+        mobile = student.get("parent_mobile", "")
+        if _normalize_indian_number(mobile):
+            variables = {
+                "1": student["name"], "2": student["roll_no"], "3": session["date"],
+                "4": session["slot"], "5": f"{session['department']} - {session['class_name']} - {session['division']}",
+            }
+            futures.append(runtime["pool"].submit(
+                _deliver_notification, "WhatsApp", mobile, message, student["name"], "Absent", cfg, variables))
+        else:
+            _record_notification("WhatsApp", mobile, student["name"], "Absent", message,
+                                 "Skipped: parent mobile number is missing or invalid")
+    if "Email" in channels:
+        email = student.get("parent_email", "").strip()
+        if "@" in email:
+            futures.append(runtime["pool"].submit(
+                _deliver_notification, "Email", email, message, student["name"], "Absent", cfg))
+        else:
+            _record_notification("Email", email, student["name"], "Absent", message,
+                                 "Skipped: parent email address is missing or invalid")
+    return futures
+
+
+def retry_notification(entry):
+    cfg = get_notification_config()
+    channel = entry.get("channel", "")
+    if channel not in enabled_notification_channels(cfg):
+        _record_notification(channel or "Unknown", entry.get("recipient", entry.get("to", "")),
+                             entry.get("student", ""), entry.get("type", "Absent"), entry.get("message", ""),
+                             "Not retried: channel is not configured")
+        return None
+    runtime = notification_runtime()
+    return runtime["pool"].submit(
+        _deliver_notification, channel, entry.get("recipient", entry.get("to", "")), entry.get("message", ""),
+        entry.get("student", ""), entry.get("type", "Absent"), cfg)
 
 
 def drain_sms_results():
-    """Move finished SMS results into the visible outbox (main thread only)."""
-    rt = sms_runtime()
+    """Move completed WhatsApp/email results into the visible notification log."""
+    rt = notification_runtime()
     with rt["lock"]:
         items = rt["results"][:]
         rt["results"].clear()
@@ -357,8 +562,7 @@ def sid_of(stud):
 
 
 def finalize_attendance(sess, students):
-    """Mark remaining students ABSENT, save logs, queue SMS, close session.
-    Present students already got their SMS at scan time (only missing ones are sent here)."""
+    """Mark remaining students absent, save logs, and queue absence alerts."""
     now_time = datetime.now().strftime("%H:%M:%S")
     batch, futs = [], []
     for stud in students:
@@ -371,12 +575,13 @@ def finalize_attendance(sess, students):
             "time": info["time"] if info else now_time, "slot": sess["slot"],
             "status": status, "method": info["method"] if info else "-",
             "parent_mobile": stud["parent_mobile"],
+            "parent_email": stud.get("parent_email", ""),
         }
         st.session_state.attendance_logs.append(entry)
         batch.append(entry)
 
-        if status == "Absent" or not info.get("sms"):
-            futs.append(queue_sms(stud["parent_mobile"], status, stud["name"]))
+        if status == "Absent":
+            futs.extend(queue_absence_notifications(stud, sess))
 
     n_present = sum(1 for b in batch if b["status"] == "Present")
     st.session_state.lecture_logs.append({
@@ -404,10 +609,9 @@ if "data_loaded" not in st.session_state:
     st.session_state.lecture_logs = saved.get("lecture_logs", [])
     st.session_state.sms_outbox = saved.get("sms_outbox", [])
     st.session_state.att_session = saved.get("att_session", None)
-    st.session_state.sms_config = saved.get("sms_config", {})
     st.session_state.data_loaded = True
 
-drain_sms_results()   # move finished SMS results into the outbox
+drain_sms_results()   # move completed notification results into the log
 
 # ---------------------------------------------------------
 # Header
@@ -464,12 +668,12 @@ if menu == "Dashboard":
             "with the registered photo, marks a matching student Present, and marks remaining "
             "students Absent when the session is submitted.")
 
-    _prov = get_sms_config()["SMS_PROVIDER"]
-    if _prov == "none":
-        st.warning("SMS is in Outbox demo mode. Configure Fast2SMS or an Android SMS gateway in "
-                   "Principal Admin Panel to send real messages.")
+    _channels = enabled_notification_channels()
+    if not _channels:
+        st.warning("Parent notifications are in demo mode. Add WhatsApp (Twilio) or email (SMTP) credentials "
+                   "to Streamlit secrets to send real absence alerts.")
     else:
-        st.success(f"SMS gateway is enabled: **{_prov}**")
+        st.success(f"Active parent notification channel(s): **{', '.join(_channels)}**")
 
     if FACE_LIB:
         st.success("Face recognition is ready.")
@@ -493,7 +697,8 @@ elif menu == "Student Registration":
         with col_b:
             s_div = st.selectbox("Division", DIVISIONS)
             s_mobile = st.text_input("Student Mobile Number")
-            p_mobile = st.text_input("Parents Mobile Number")
+            p_mobile = st.text_input("Parent Mobile Number (for WhatsApp alerts)")
+            p_email = st.text_input("Parent Email Address (for email alerts)")
 
         st.markdown("---")
         st.write("📸 **Passport Photo (used for optional face recognition):**")
@@ -506,8 +711,12 @@ elif menu == "Student Registration":
             errors.append("Student Name and Roll No. are required.")
         if not (s_mobile.strip().isdigit() and len(s_mobile.strip()) == 10):
             errors.append("Student Mobile Number must contain exactly 10 digits.")
-        if not (p_mobile.strip().isdigit() and len(p_mobile.strip()) == 10):
-            errors.append("Parent Mobile Number must contain exactly 10 digits.")
+        if p_mobile.strip() and not (p_mobile.strip().isdigit() and len(p_mobile.strip()) == 10):
+            errors.append("Parent Mobile Number must contain exactly 10 digits, or be left blank for email-only alerts.")
+        if p_email.strip() and ("@" not in p_email or "." not in p_email.rsplit("@", 1)[-1]):
+            errors.append("Enter a valid parent email address, or leave it blank.")
+        if not p_mobile.strip() and not p_email.strip():
+            errors.append("Enter at least one parent contact: a mobile number or email address.")
         if any(s['roll_no'] == s_roll.strip() and s['class_name'] == s_class and s['division'] == s_div
                and s['department'] == s_dept for s in st.session_state.students_db):
             errors.append("This Roll No. already exists in the selected Department, Class, and Division.")
@@ -538,7 +747,8 @@ elif menu == "Student Registration":
             st.session_state.students_db.append({
                 "roll_no": s_roll.strip(), "name": s_name.strip(), "department": s_dept,
                 "class_name": s_class, "division": s_div, "mobile": s_mobile.strip(),
-                "parent_mobile": p_mobile.strip(), "photo": photo_bytes, "encoding": encoding,
+                "parent_mobile": p_mobile.strip(), "parent_email": p_email.strip().lower(),
+                "photo": photo_bytes, "encoding": encoding,
             })
             save_data()
             mode = "Face + manual attendance" if encoding is not None else "Manual attendance"
@@ -621,13 +831,13 @@ elif menu == "Faculty Portal & Attendance":
             st.progress(n_pres / total if total else 0.0,
                         text=f"✅ Present: {n_pres} / {total}   |   ⏳ Remaining: {total - n_pres}")
 
-            # ---- latest SMS status ----
-            with st.expander("📨 Latest SMS status"):
+            # ---- latest notification status ----
+            with st.expander("📨 Latest parent notification status"):
                 recent = st.session_state.sms_outbox[-5:][::-1]
                 if recent:
                     show_df(pd.DataFrame(recent)[["time", "student", "type", "status"]])
                 else:
-                    st.write("No SMS messages yet.")
+                    st.write("No parent notifications yet.")
 
             # ---- result of the last scan ----
             last = sess.get("last")
@@ -685,10 +895,9 @@ elif menu == "Faculty Portal & Attendance":
                             else:
                                 sess["present"][sid] = {"time": datetime.now().strftime("%H:%M:%S"),
                                                         "method": "Face", "sms": True}
-                                queue_sms(stud["parent_mobile"], "Present", stud["name"])   # instant SMS
                                 sess["last"] = ("success",
                                                 f"✅ {stud['name']} (Roll {stud['roll_no']}) – Present! "
-                                                f"Parent notification queued. (match distance {best:.2f}){multi}")
+                                                f"(match distance {best:.2f}){multi}")
                         else:
                             sess["last"] = ("error",
                                             "Face not recognised for any student in this class. "
@@ -727,7 +936,6 @@ elif menu == "Faculty Portal & Attendance":
                             _s = by_sid[man_labels[lab]]
                             sess["present"][man_labels[lab]] = {
                                 "time": datetime.now().strftime("%H:%M:%S"), "method": "Manual", "sms": True}
-                            queue_sms(_s["parent_mobile"], "Present", _s["name"])   # instant SMS
                         sess["last"] = ("success", f"{len(man_pick)} student(s) were marked Present manually.")
                         st.session_state.att_session = sess
                         save_data()
@@ -752,8 +960,8 @@ elif menu == "Faculty Portal & Attendance":
 
             # ---- finish / cancel ----
             st.markdown("---")
-            st.caption("Parent SMS notifications are queued when a student is marked Present. "
-                       "Submitting attendance queues notifications for the remaining Absent students.")
+            st.caption("When attendance is submitted, WhatsApp and/or email absence alerts are queued only "
+                       "for students still marked Absent.")
             b1, b2 = st.columns(2)
             if b1.button("🏁 Finish & Submit Attendance", type="primary"):
                 with st.spinner("Saving attendance and notifying parents of Absent students..."):
@@ -761,18 +969,15 @@ elif menu == "Faculty Portal & Attendance":
                     if futs:
                         wait(futs, timeout=45)
                 statuses = [f.result() for f in futs if f.done()]
-                n_sent = sum(1 for x in statuses if x == "Sent")
-                n_logged = sum(1 for x in statuses if x.startswith("Logged"))
-                n_fail = len(futs) - n_sent - n_logged
+                n_sent = sum(1 for x in statuses if x.startswith("Queued") or x == "Email sent")
+                n_fail = sum(1 for x in statuses if x.startswith("Failed"))
                 drain_sms_results()
                 st.success(f"Attendance saved. Present: {n_present} | Absent: {len(batch) - n_present}")
-                if n_logged:
-                    st.warning(f"{n_logged} message(s) were saved to the Outbox because a live SMS gateway is not configured.")
                 if n_sent:
-                    st.success(f"{n_sent} parent SMS message(s) were sent.")
+                    st.success(f"{n_sent} absence notification(s) were delivered or queued.")
                 if n_fail:
-                    st.error(f"{n_fail} SMS message(s) failed or are still in progress. Check Principal Panel → SMS Outbox "
-                             f"and use 'Retry Failed SMS'.")
+                    st.error(f"{n_fail} notification(s) failed. Check Principal Panel → Notification Log "
+                             f"and use 'Retry Failed Notifications'.")
                 show_df(pd.DataFrame(batch)[['roll_no', 'name', 'department', 'status', 'method']])
             if b2.button("🗑️ Cancel Attendance Session"):
                 st.session_state.att_session = None
@@ -838,69 +1043,28 @@ elif menu == "Principal Admin Panel":
     if admin_pass == principal_password():
         st.success("Authenticated as Principal Admin ✅")
 
-        active_sms = get_sms_config()
-        sms_options = {
-            "Outbox demo (no live SMS)": "none",
-            "Fast2SMS": "fast2sms",
-            "Android SMS gateway": "android",
-        }
-        selected_label = next((label for label, value in sms_options.items()
-                               if value == active_sms["SMS_PROVIDER"]), "Outbox demo (no live SMS)")
-        with st.expander("⚙️ SMS Gateway Setup", expanded=active_sms["SMS_PROVIDER"] == "none"):
-            st.caption("Choose a provider, enter your own gateway credentials, then send a test message. "
-                       "Without valid credentials, messages are safely saved to the local Outbox only.")
-            with st.form("sms_gateway_form"):
-                sms_label = st.selectbox("SMS provider", list(sms_options),
-                                         index=list(sms_options).index(selected_label))
-                sms_provider = sms_options[sms_label]
-                configured = {"SMS_PROVIDER": sms_provider}
-                test_mobile = st.text_input("Test mobile number (optional)", key="sms_test_mobile")
-                if sms_provider == "fast2sms":
-                    configured["FAST2SMS_API_KEY"] = st.text_input(
-                        "Fast2SMS API key", value=active_sms["FAST2SMS_API_KEY"], type="password")
-                    configured["FAST2SMS_ROUTE"] = st.selectbox(
-                        "Fast2SMS route", ["q", "dlt"],
-                        index=0 if active_sms["FAST2SMS_ROUTE"].lower() != "dlt" else 1)
-                    configured["FAST2SMS_SENDER_ID"] = st.text_input(
-                        "DLT sender ID (required only for DLT)", value=active_sms["FAST2SMS_SENDER_ID"])
-                    configured["FAST2SMS_TEMPLATE_PRESENT"] = st.text_input(
-                        "DLT Present template ID (required only for DLT)",
-                        value=active_sms["FAST2SMS_TEMPLATE_PRESENT"])
-                    configured["FAST2SMS_TEMPLATE_ABSENT"] = st.text_input(
-                        "DLT Absent template ID (required only for DLT)",
-                        value=active_sms["FAST2SMS_TEMPLATE_ABSENT"])
-                elif sms_provider == "android":
-                    configured["GATEWAY_URL"] = st.text_input(
-                        "Android SMS gateway URL", value=active_sms["GATEWAY_URL"])
-                    configured["GATEWAY_TOKEN"] = st.text_input(
-                        "Android gateway token", value=active_sms["GATEWAY_TOKEN"], type="password")
-                save_sms = st.form_submit_button("Save SMS Configuration")
-                test_sms = st.form_submit_button("Save and Send Test SMS")
-
-            if save_sms or test_sms:
-                config_errors = []
-                if sms_provider == "fast2sms" and not configured.get("FAST2SMS_API_KEY", "").strip():
-                    config_errors.append("A Fast2SMS API key is required.")
-                if sms_provider == "android":
-                    if not configured.get("GATEWAY_URL", "").strip():
-                        config_errors.append("An Android SMS gateway URL is required.")
-                    if not configured.get("GATEWAY_TOKEN", "").strip():
-                        config_errors.append("An Android gateway token is required.")
-                if test_sms and not (test_mobile.strip().isdigit() and len(test_mobile.strip()) == 10):
-                    config_errors.append("Enter a valid 10-digit test mobile number.")
-
-                if config_errors:
-                    for error in config_errors:
-                        st.error(error)
-                else:
-                    st.session_state.sms_config = configured
-                    save_data()
-                    st.success("SMS configuration saved.")
-                    if test_sms:
-                        future = queue_sms(test_mobile.strip(), "Present", "SMS gateway test")
-                        wait([future], timeout=30)
-                        drain_sms_results()
-                        st.success("Test SMS was queued. Check the SMS Outbox for the delivery result.")
+        notification_cfg = get_notification_config()
+        active_channels = enabled_notification_channels(notification_cfg)
+        with st.expander("⚙️ Parent notification setup", expanded=not active_channels):
+            if active_channels:
+                st.success(f"Configured channel(s): {', '.join(active_channels)}")
+            else:
+                st.warning("No live notification channel is configured. Attendance is still saved, but absence alerts remain in the Notification Log.")
+            st.markdown("**WhatsApp:** Twilio WhatsApp API. **Email:** any SMTP provider, such as Gmail with an App Password.")
+            st.caption("A Twilio Content Template is required for proactive WhatsApp alerts outside the 24-hour WhatsApp service window.")
+            st.markdown("For local use, copy `secrets.example.toml` to `.streamlit/secrets.toml`. "
+                        "For Streamlit Community Cloud, paste the same values into **App settings → Secrets**. "
+                        "Credentials are never stored in the student database.")
+            st.code(
+                'TWILIO_ACCOUNT_SID = "your-twilio-account-sid"\n'
+                'TWILIO_AUTH_TOKEN = "your-twilio-auth-token"\n'
+                'TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"\n\n'
+                'TWILIO_CONTENT_SID = "your-approved-absence-template-id"\n\n'
+                'SMTP_HOST = "smtp.gmail.com"\n'
+                'SMTP_PORT = "587"\n'
+                'SMTP_USERNAME = "college@example.com"\n'
+                'SMTP_PASSWORD = "your-email-app-password"\n'
+                'SMTP_FROM_EMAIL = "college@example.com"', language="toml")
 
         if not st.session_state.lecture_logs:
             st.warning("No faculty attendance has been recorded yet.")
@@ -924,8 +1088,9 @@ elif menu == "Principal Admin Panel":
 
             st.markdown("#### 👨‍🎓 Student-wise attendance")
             df_all = pd.DataFrame(st.session_state.attendance_logs)
-            if "parent_mobile" in df_all.columns:
-                df_all = df_all.drop(columns=["parent_mobile"])
+            private_columns = [column for column in ("parent_mobile", "parent_email") if column in df_all.columns]
+            if private_columns:
+                df_all = df_all.drop(columns=private_columns)
             if f_dept != "All":
                 df_all = df_all[df_all['department'] == f_dept]
             if f_class != "All":
@@ -943,50 +1108,27 @@ elif menu == "Principal Admin Panel":
                 mime="text/csv",
             )
 
-            st.markdown("#### 📲 Daily attendance summary for parents")
-            summary_date = st.date_input("Summary date", datetime.now().date(), key="daily_summary_date")
-            if st.button("Send Daily Summary SMS to Parents", type="primary"):
-                date_str = str(summary_date)
-                per_student = {}
-                for log in st.session_state.attendance_logs:
-                    if log["date"] != date_str:
-                        continue
-                    key = (log["department"], log["class_name"], log["division"], log["roll_no"])
-                    per_student.setdefault(key, {"name": log["name"], "mobile": log["parent_mobile"], "rows": []})
-                    per_student[key]["rows"].append(f"{log['slot']}: {log['status']}")
-
-                if not per_student:
-                    st.warning("The selected date has no attendance records.")
-                else:
-                    futures = []
-                    for (_, class_name, division, roll_no), details in per_student.items():
-                        message = (f"Sandipani Technical Campus - Daily Report {date_str}: "
-                                   f"{details['name']} (Roll No. {roll_no}, {class_name} {division}). "
-                                   + " | ".join(details["rows"]))
-                        futures.append(queue_daily_summary(details["mobile"], message, details["name"]))
-                    wait(futures, timeout=45)
-                    drain_sms_results()
-                    save_data()
-                    st.success(f"Daily summaries have been queued for {len(per_student)} parent(s).")
-
-        with st.expander("📨 SMS Outbox", expanded=True):
+        with st.expander("📨 Parent Notification Log", expanded=True):
             outbox = st.session_state.sms_outbox
             if outbox:
                 show_df(pd.DataFrame(outbox[::-1]))
                 failed = [i for i, o in enumerate(outbox)
                           if str(o.get("status", "")).startswith("Failed") and "type" in o]
-                if failed and st.button(f"🔁 Retry {len(failed)} Failed SMS Message(s)"):
+                if failed and st.button(f"🔁 Retry {len(failed)} Failed Notification(s)"):
                     futs = []
                     for i in failed:
                         o = outbox[i]
-                        futs.append(queue_sms(o["to"], o["type"], o.get("student", "")))
+                        retry = retry_notification(o)
+                        if retry is not None:
+                            futs.append(retry)
                         o["status"] = "Retried"
-                    wait(futs, timeout=45)
+                    if futs:
+                        wait(futs, timeout=45)
                     drain_sms_results()
                     save_data()
                     st.rerun()
             else:
-                st.write("No SMS messages have been queued yet.")
+                st.write("No parent notifications have been queued yet.")
     elif admin_pass != "":
         st.error("Incorrect Password!")
 
@@ -1002,6 +1144,7 @@ elif menu == "Manage Students":
             "Roll No.": s['roll_no'], "Name": s['name'], "Department": s['department'],
             "Class": s['class_name'], "Division": s['division'],
             "Student Mobile": s['mobile'], "Parents Mobile": s['parent_mobile'],
+            "Parent Email": s.get('parent_email', ''),
             "Photo Registered": "Yes" if s.get('encoding') is not None else "No",
         } for s in st.session_state.students_db]
         show_df(pd.DataFrame(rows))

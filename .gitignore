@@ -1,5 +1,6 @@
 # Local application data and development environments
 campus_data.pkl
+campus_data.db
 .venv/
 __pycache__/
 *.pyc
