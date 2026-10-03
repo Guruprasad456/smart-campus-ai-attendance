@@ -1,0 +1,11 @@
+# Local application data and development environments
+campus_data.pkl
+.venv/
+__pycache__/
+*.pyc
+*.log
+*.whl
+project.txt
+
+# Streamlit secrets must never be committed
+.streamlit/secrets.toml
