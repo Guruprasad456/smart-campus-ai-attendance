@@ -601,10 +601,13 @@ def finalize_attendance(sess, students):
 if "data_loaded" not in st.session_state:
     saved = load_data()
     st.session_state.students_db = saved.get("students_db", [])
-    st.session_state.faculty_db = saved.get("faculty_db", [
+    default_faculty = [
         {"name": "Dr. V. K. Kulkarni", "mobile": "9876543210",
          "username": "faculty1", "password_hash": hash_pw("123")}
-    ])
+    ]
+    # A brand-new SQLite database contains an empty faculty list. Keep the
+    # documented starter faculty account available on first launch.
+    st.session_state.faculty_db = saved.get("faculty_db") or default_faculty
     st.session_state.attendance_logs = saved.get("attendance_logs", [])
     st.session_state.lecture_logs = saved.get("lecture_logs", [])
     st.session_state.sms_outbox = saved.get("sms_outbox", [])
@@ -1045,26 +1048,13 @@ elif menu == "Principal Admin Panel":
 
         notification_cfg = get_notification_config()
         active_channels = enabled_notification_channels(notification_cfg)
-        with st.expander("⚙️ Parent notification setup", expanded=not active_channels):
+        with st.expander("⚙️ Parent notification status", expanded=False):
             if active_channels:
                 st.success(f"Configured channel(s): {', '.join(active_channels)}")
             else:
-                st.warning("No live notification channel is configured. Attendance is still saved, but absence alerts remain in the Notification Log.")
-            st.markdown("**WhatsApp:** Twilio WhatsApp API. **Email:** any SMTP provider, such as Gmail with an App Password.")
-            st.caption("A Twilio Content Template is required for proactive WhatsApp alerts outside the 24-hour WhatsApp service window.")
-            st.markdown("For local use, copy `secrets.example.toml` to `.streamlit/secrets.toml`. "
-                        "For Streamlit Community Cloud, paste the same values into **App settings → Secrets**. "
-                        "Credentials are never stored in the student database.")
-            st.code(
-                'TWILIO_ACCOUNT_SID = "your-twilio-account-sid"\n'
-                'TWILIO_AUTH_TOKEN = "your-twilio-auth-token"\n'
-                'TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"\n\n'
-                'TWILIO_CONTENT_SID = "your-approved-absence-template-id"\n\n'
-                'SMTP_HOST = "smtp.gmail.com"\n'
-                'SMTP_PORT = "587"\n'
-                'SMTP_USERNAME = "college@example.com"\n'
-                'SMTP_PASSWORD = "your-email-app-password"\n'
-                'SMTP_FROM_EMAIL = "college@example.com"', language="toml")
+                st.info("No live notification channel is configured yet. Attendance is still saved safely in the local database.")
+            st.write("To enable real WhatsApp or email alerts, copy `secrets.example.toml` to `.streamlit/secrets.toml` and add the college's provider credentials.")
+            st.caption("Credentials are never stored with student records. The Notification Log shows every sent or failed alert.")
 
         if not st.session_state.lecture_logs:
             st.warning("No faculty attendance has been recorded yet.")

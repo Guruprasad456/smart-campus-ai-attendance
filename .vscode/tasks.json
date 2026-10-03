@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Smart Campus",
+      "type": "shell",
+      "command": "C:\\Users\\LAPPY HUB\\anaconda3\\python.exe",
+      "args": [
+        "-m",
+        "streamlit",
+        "run",
+        "app.py"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

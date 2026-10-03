@@ -10,6 +10,18 @@ A Streamlit application for student registration, faculty attendance, local SQLi
 
 Open `http://127.0.0.1:8501`.
 
+## Run in VS Code
+
+1. Open this folder in VS Code: `C:\Users\LAPPY HUB\Downloads\My project\My project`.
+2. Install the Microsoft **Python** extension if VS Code asks.
+3. Press **F5** and choose **Run Smart Campus**. The included VS Code settings use your Anaconda Python automatically.
+
+You can also open the VS Code terminal and run:
+
+```powershell
+& "C:\Users\LAPPY HUB\anaconda3\python.exe" -m streamlit run app.py
+```
+
 Default credentials (only when `PRINCIPAL_PASSWORD` is not configured in secrets):
 
 - Faculty: `faculty1` / `123`
@@ -26,7 +38,7 @@ When an attendance session is submitted, every student not marked Present is rec
 - **WhatsApp:** through Twilio's WhatsApp Business API.
 - **Email:** through your college SMTP account.
 
-Open **Principal Admin Panel → Parent notification setup** to see whether the channels are configured. Copy `secrets.example.toml` into either a local `.streamlit/secrets.toml` file or Streamlit Community Cloud **App settings → Secrets**, then replace every placeholder with credentials owned by the college. Do not commit live API keys or email passwords.
+Open **Principal Admin Panel → Parent notification status** to see whether the channels are configured. Copy `secrets.example.toml` into either a local `.streamlit/secrets.toml` file or Streamlit Community Cloud **App settings → Secrets**, then replace every placeholder with credentials owned by the college. Do not commit live API keys or email passwords.
 
 Twilio Sandbox/free-form messages work for opted-in recipients and active WhatsApp sessions. Production absence alerts that may be sent outside WhatsApp's 24-hour customer-service window require an approved Twilio/Meta template; set its ID as `TWILIO_CONTENT_SID`. The app supplies variables 1-5: student name, roll number, date, lecture slot, and class.
 
