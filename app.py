@@ -118,6 +118,13 @@ st.markdown("""
     .sidebar-status { padding: .95rem; margin-top: 1.25rem; border-radius: 15px; background: rgba(91,140,255,.10); border: 1px solid rgba(123,160,255,.17); }
     .sidebar-status strong { display:block; color:#e9f0ff; font-size: .86rem; margin-bottom:.24rem; }
     .sidebar-status span { color:#9fb4e4; font-size:.76rem; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] { display:grid; gap:.42rem; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label {
+        margin:0; padding:.7rem .72rem; border-radius:11px; background:rgba(255,255,255,.025);
+        border:1px solid transparent; transition:background .2s ease, border-color .2s ease;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background:rgba(116,151,255,.11); border-color:rgba(142,174,255,.18); }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) { background:rgba(91,140,255,.16); border-color:rgba(132,167,255,.34); }
     .section-heading { margin: 1.8rem 0 1.05rem; display:flex; align-items: center; gap:.85rem; animation: liftIn .45s ease-out; }
     .section-icon { display:grid; place-items:center; flex: 0 0 auto; width: 43px; height:43px; border-radius:14px; background:linear-gradient(145deg, rgba(91,140,255,.28), rgba(157,112,255,.22)); border: 1px solid rgba(153,181,255,.25); font-size:1.35rem; }
     .section-heading .eyebrow { color:#86a8ff; font-size:.66rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
@@ -153,6 +160,12 @@ st.markdown("""
     .quick-card { padding:.9rem; border-radius:14px; background:rgba(255,255,255,.035); border:1px solid rgba(163,190,255,.10); }
     .quick-card strong { color:#eaf0ff; display:block; font-size:.83rem; margin:.35rem 0; }
     .quick-card span { color:#92a2c3; font-size:.73rem; line-height:1.4; }
+    .workspace-card { min-height:154px; padding:1.05rem; margin-bottom:.55rem; border-radius:18px; background:linear-gradient(145deg, rgba(22,33,58,.92), rgba(13,20,37,.94)); border:1px solid var(--line); transition:transform .22s ease, border-color .22s ease; }
+    .workspace-card:hover { transform:translateY(-4px); border-color:rgba(157,184,255,.38); }
+    .workspace-card .workspace-icon { display:grid; place-items:center; width:38px; height:38px; border-radius:11px; background:rgba(91,140,255,.17); font-size:1.1rem; }
+    .workspace-card .workspace-tag { margin-top:.8rem; color:#8fadff; font-size:.66rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+    .workspace-card h3 { margin:.25rem 0 .25rem; color:#f3f6ff; font-size:1rem; }
+    .workspace-card p { margin:0; color:#97a6c6; font-size:.78rem; line-height:1.45; }
     [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input,
     [data-baseweb="select"] > div, [data-testid="stTextArea"] textarea {
         color: #eef3ff !important; background: rgba(16,24,43,.85) !important;
@@ -754,14 +767,27 @@ st.sidebar.markdown("""
 </div>
 <div class="sidebar-label">Workspace</div>
 """, unsafe_allow_html=True)
-menu = st.sidebar.selectbox("Open workspace", [
-    "Dashboard",
-    "Student Registration",
-    "Faculty Portal & Attendance",
-    "Principal Admin Panel",
-    "Manage Students",
-    "Emergency SOS",
-], label_visibility="collapsed")
+navigation_labels = {
+    "Dashboard": "⌘  Dashboard",
+    "Student Registration": "✦  Student registration",
+    "Faculty Portal & Attendance": "◉  Faculty & attendance",
+    "Principal Admin Panel": "⌁  Principal controls",
+    "Manage Students": "▦  Student directory",
+    "Emergency SOS": "!  Emergency SOS",
+}
+if "workspace_menu" not in st.session_state:
+    st.session_state.workspace_menu = navigation_labels["Dashboard"]
+selected_menu_label = st.sidebar.radio(
+    "Open workspace", list(navigation_labels.values()), key="workspace_menu", label_visibility="collapsed"
+)
+menu = next(name for name, label in navigation_labels.items() if label == selected_menu_label)
+
+
+def open_workspace(destination):
+    """Navigate from the dashboard menu without changing any app data."""
+    st.session_state.workspace_menu = navigation_labels[destination]
+
+
 with st.sidebar.expander("🕒 Daily timetable", expanded=False):
     st.markdown(
         "10:00 – 11:00  \n11:00 – 12:00  \n☕ Break · 12:00 – 12:45  \n12:45 – 01:45  \n"
@@ -778,65 +804,36 @@ st.sidebar.markdown("""
 # MODULE 1: Dashboard
 # ---------------------------------------------------------
 if menu == "Dashboard":
-    st.markdown(section_heading("⌘", "Command center", "Campus pulse, at a glance",
-                                "A clear real-time view of attendance, records, and readiness."), unsafe_allow_html=True)
-    today = str(datetime.now().date())
-    today_logs = [l for l in st.session_state.attendance_logs if l['date'] == today]
-    if today_logs:
-        pct = 100 * sum(1 for l in today_logs if l['status'] == "Present") / len(today_logs)
-        today_txt = f"{pct:.1f}%"
-        attendance_note = f"{len(today_logs)} attendance record(s) today"
-    else:
-        today_txt = "—"
-        attendance_note = "No attendance submitted today"
-
-    lectures_today = sum(1 for l in st.session_state.lecture_logs if l["date"] == today)
-
-    c1, c2, c3, c4 = st.columns(4)
-    _channels = enabled_notification_channels()
-    c1.markdown(metric_card("👥", "blue", "Student directory", len(st.session_state.students_db),
-                            "Registered student profiles", "RECORDS"), unsafe_allow_html=True)
-    c2.markdown(metric_card("◌", "violet", "Faculty network", len(st.session_state.faculty_db),
-                            "Faculty accounts available", "PEOPLE"), unsafe_allow_html=True)
-    c3.markdown(metric_card("↗", "teal", "Attendance today", today_txt,
-                            attendance_note, "LIVE"), unsafe_allow_html=True)
-    c4.markdown(metric_card("▦", "rose", "Lectures today", lectures_today,
-                            "Completed class sessions", "ACTIVITY"), unsafe_allow_html=True)
-
-    face_title = "Face AI is ready" if FACE_LIB else "Manual attendance is ready"
-    face_note = ("Camera matching can be used for registered student photos." if FACE_LIB
-                 else "Face matching is optional; use Manual Present for every session.")
-    notification_title = " + ".join(_channels) + " alert channel active" if _channels else "Parent alerts in demo mode"
-    notification_note = ("Absence alerts will be queued after attendance is submitted." if _channels
-                         else "Add WhatsApp or email credentials when the college is ready to send alerts.")
-    recent_text = (f"{lectures_today} lecture session(s) completed today." if lectures_today
-                   else "Start a faculty session to create today's first attendance record.")
-    left_panel, right_panel = st.columns([1.3, 1])
-    with left_panel:
-        st.markdown(f"""
-        <div class="smart-panel">
-            <div class="panel-kicker">Daily workflow</div>
-            <h3>Everything needed for a confident attendance run.</h3>
-            <p>{recent_text}</p>
-            <div class="quick-grid">
-                <div class="quick-card"><div>01 · 🪪</div><strong>Register</strong><span>Add verified student details and parent contacts.</span></div>
-                <div class="quick-card"><div>02 · ◉</div><strong>Mark attendance</strong><span>Use Face AI when available, or the built-in manual flow.</span></div>
-                <div class="quick-card"><div>03 · ✉</div><strong>Notify parents</strong><span>Absent students are logged and alerted through enabled channels.</span></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with right_panel:
-        st.markdown(f"""
-        <div class="smart-panel">
-            <div class="panel-kicker">System signals</div>
-            <h3>Campus services</h3>
-            <div class="signal-list">
-                <div class="signal-row"><i class="signal-dot green"></i><div><strong>{face_title}</strong><span>{face_note}</span></div></div>
-                <div class="signal-row"><i class="signal-dot {'green' if _channels else 'amber'}"></i><div><strong>{notification_title}</strong><span>{notification_note}</span></div></div>
-                <div class="signal-row"><i class="signal-dot green"></i><div><strong>Local storage connected</strong><span>Student and attendance records are available on this device.</span></div></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown(section_heading("☷", "Workspace menu", "What would you like to do?",
+                                "Choose a module below. All campus functions are available from this menu."), unsafe_allow_html=True)
+    workspace_cards = [
+        ("✦", "Student registration", "Create a new student record with class and parent details.", "Student Registration", "Open registration"),
+        ("◉", "Faculty & attendance", "Sign in, start a class session, and mark student attendance.", "Faculty Portal & Attendance", "Open attendance"),
+        ("⌁", "Principal controls", "Review reports, notification delivery, and overall attendance.", "Principal Admin Panel", "Open principal panel"),
+        ("▦", "Student directory", "View registered students and maintain accurate records.", "Manage Students", "Open directory"),
+        ("!", "Emergency SOS", "Open the emergency alert control for campus security.", "Emergency SOS", "Open SOS control"),
+    ]
+    for start in range(0, len(workspace_cards), 3):
+        columns = st.columns(3)
+        for column, (icon, title, description, destination, button_text) in zip(columns, workspace_cards[start:start + 3]):
+            with column:
+                st.markdown(f"""
+                <div class="workspace-card">
+                    <div class="workspace-icon">{icon}</div>
+                    <div class="workspace-tag">Campus module</div>
+                    <h3>{title}</h3>
+                    <p>{description}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                st.button(button_text, key=f"dashboard_{destination}", use_container_width=True,
+                          on_click=open_workspace, args=(destination,))
+    st.markdown("""
+    <div class="smart-panel" style="margin-top:1.2rem; min-height:0;">
+        <div class="panel-kicker">How to use the system</div>
+        <h3>Start with student registration, then move to attendance.</h3>
+        <p>Parent alerts are automatically logged for absent students when your WhatsApp or email channel is enabled.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # MODULE 2: Student Registration
