@@ -513,14 +513,24 @@ def get_notification_config():
     return cfg
 
 
+def is_real_notification_setting(value):
+    """Reject the example values that are copied with secrets.example.toml."""
+    text = str(value or "").strip()
+    placeholder_values = {"college@example.com", "your-account-sid", "your-auth-token"}
+    return bool(text) and "replace-with" not in text.lower() and text.lower() not in placeholder_values
+
+
 def enabled_notification_channels(cfg=None):
     cfg = cfg or get_notification_config()
     channels = []
-    if all(cfg[key].strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM")):
+    if all(is_real_notification_setting(cfg.get(key, ""))
+           for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM")):
         channels.append("WhatsApp")
-    if all(cfg[key].strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM")):
+    if all(is_real_notification_setting(cfg.get(key, ""))
+           for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM")):
         channels.append("SMS")
-    if all(cfg[key].strip() for key in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL")):
+    if all(is_real_notification_setting(cfg.get(key, ""))
+           for key in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL")):
         channels.append("Email")
     return channels
 
@@ -534,7 +544,7 @@ def notification_configuration_gaps(cfg=None):
         "Email": ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL"),
     }
     return {
-        channel: [setting for setting in settings if not str(cfg.get(setting, "")).strip()]
+        channel: [setting for setting in settings if not is_real_notification_setting(cfg.get(setting, ""))]
         for channel, settings in requirements.items()
     }
 
@@ -780,6 +790,9 @@ def render_parent_alert_sender(records, key_prefix, audience_label, show_parent_
             drain_sms_results()
             if any(status.startswith("Failed") for status in statuses):
                 st.error("One or more alerts could not be delivered. Open Parent Notification Log for details.")
+                with st.expander("View latest delivery response", expanded=True):
+                    for status in statuses:
+                        st.write(f"• {status}")
             elif statuses:
                 st.success("Parent alert queued successfully. Check Parent Notification Log for the delivery status.")
             else:
@@ -833,7 +846,9 @@ def principal_password():
     ]
     if any(os.path.exists(path) for path in secrets_paths):
         try:
-            return st.secrets.get("PRINCIPAL_PASSWORD", "principal123")
+            configured_password = st.secrets.get("PRINCIPAL_PASSWORD", "")
+            if is_real_notification_setting(configured_password):
+                return configured_password
         except Exception:
             pass
     return "principal123"
