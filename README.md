@@ -45,6 +45,8 @@ Faculty and Principal can also send or resend one selected absence alert from **
 
 Open **Principal Admin Panel → Parent notification status** to see whether the channels are configured. Copy `secrets.example.toml` into either a local `.streamlit/secrets.toml` file or Streamlit Community Cloud **App settings → Secrets**, then replace every placeholder with credentials owned by the college. Set `TWILIO_SMS_FROM` only when the college has an SMS-capable Twilio number. Do not commit live API keys or email passwords.
 
+Only a signed-in Principal can change the WhatsApp sender in **Principal Admin Panel → College WhatsApp sender**. Enter an already approved Twilio sender such as `whatsapp:+14155238886`, then save it. The number is stored locally with the app data and overrides `TWILIO_WHATSAPP_FROM`; the Twilio Account SID/Auth Token and SMTP passwords remain only in the protected secrets file. Faculty can send absence alerts but cannot change the college sender or secrets.
+
 Twilio Sandbox/free-form messages work for opted-in recipients and active WhatsApp sessions. Production absence alerts that may be sent outside WhatsApp's 24-hour customer-service window require an approved Twilio/Meta template; set its ID as `TWILIO_CONTENT_SID`. The app supplies variables 1-5: student name, roll number, date, lecture slot, and class.
 
 ### Send an absence alert manually

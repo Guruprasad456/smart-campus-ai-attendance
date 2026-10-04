@@ -211,7 +211,7 @@ def hash_pw(p):
 
 
 PERSIST_KEYS = ["students_db", "faculty_db", "attendance_logs", "lecture_logs",
-                "sms_outbox", "att_session"]
+                "sms_outbox", "att_session", "whatsapp_sender_override"]
 
 
 class CampusStorage:
@@ -318,9 +318,12 @@ class CampusStorage:
                 notifications.append(item)
             state = conn.execute("SELECT value FROM app_state WHERE key = 'att_session'").fetchone()
             att_session = self._unblob(state["value"]) if state else None
+            sender_state = conn.execute("SELECT value FROM app_state WHERE key = 'whatsapp_sender_override'").fetchone()
+            whatsapp_sender_override = self._unblob(sender_state["value"]) if sender_state else ""
             return {
                 "students_db": students, "faculty_db": faculty, "attendance_logs": attendance,
                 "lecture_logs": lectures, "sms_outbox": notifications, "att_session": att_session,
+                "whatsapp_sender_override": whatsapp_sender_override or "",
             }
 
     def save(self, data):
@@ -375,10 +378,14 @@ class CampusStorage:
                 row.get("student", ""), row.get("type", ""), row.get("message", ""), row.get("status", ""),
             ) for row in notifications])
 
-            conn.execute("DELETE FROM app_state WHERE key = 'att_session'")
+            conn.execute("DELETE FROM app_state WHERE key IN ('att_session', 'whatsapp_sender_override')")
             session = data.get("att_session")
             if session is not None:
                 conn.execute("INSERT INTO app_state (key, value) VALUES ('att_session', ?)", (self._blob(session),))
+            sender_override = str(data.get("whatsapp_sender_override", "") or "").strip()
+            if sender_override:
+                conn.execute("INSERT INTO app_state (key, value) VALUES ('whatsapp_sender_override', ?)",
+                             (self._blob(sender_override),))
 
 
 @st.cache_resource
@@ -497,6 +504,12 @@ def get_notification_config():
                 cfg[key] = str(st.secrets.get(key, cfg[key]) or "")
         except Exception:
             pass
+    # The college sender is not a credential. A Principal can replace this
+    # approved Twilio WhatsApp sender from the app without exposing account
+    # tokens or email passwords in the interface or SQLite database.
+    sender_override = str(st.session_state.get("whatsapp_sender_override", "") or "").strip()
+    if sender_override:
+        cfg["TWILIO_WHATSAPP_FROM"] = sender_override
     return cfg
 
 
@@ -541,6 +554,17 @@ def _normalize_indian_number(mobile):
         return "+91" + digits
     if len(digits) >= 11 and digits.startswith("91"):
         return "+" + digits
+    return ""
+
+
+def normalize_whatsapp_sender(sender):
+    """Validate an approved Twilio WhatsApp sender in E.164 format."""
+    raw = str(sender or "").strip()
+    if raw.lower().startswith("whatsapp:"):
+        raw = raw.split(":", 1)[1].strip()
+    digits = "".join(character for character in raw if character.isdigit())
+    if raw.startswith("+") and 8 <= len(digits) <= 15:
+        return f"whatsapp:+{digits}"
     return ""
 
 
@@ -841,6 +865,7 @@ if "data_loaded" not in st.session_state:
     st.session_state.lecture_logs = saved.get("lecture_logs", [])
     st.session_state.sms_outbox = saved.get("sms_outbox", [])
     st.session_state.att_session = saved.get("att_session", None)
+    st.session_state.whatsapp_sender_override = saved.get("whatsapp_sender_override", "")
     st.session_state.data_loaded = True
 
 drain_sms_results()   # move completed notification results into the log
@@ -1321,6 +1346,40 @@ elif menu == "Principal Admin Panel":
                 st.info("No live notification channel is configured yet. Attendance is still saved safely in the local database.")
             st.write("To enable real WhatsApp, SMS, or email alerts, copy `secrets.example.toml` to `.streamlit/secrets.toml` and add the college's provider credentials.")
             st.caption("Credentials are never stored with student records. The Notification Log shows every sent or failed alert.")
+
+        with st.expander("📱 College WhatsApp sender", expanded=False):
+            saved_sender = str(st.session_state.get("whatsapp_sender_override", "") or "").strip()
+            configured_sender = notification_cfg.get("TWILIO_WHATSAPP_FROM", "").strip()
+            effective_sender = saved_sender or configured_sender
+            st.caption(
+                "Principal-only setting. It changes the approved sender number used for WhatsApp alerts; "
+                "it never displays or stores Twilio tokens or email passwords."
+            )
+            if effective_sender:
+                st.info(f"Current WhatsApp sender: {effective_sender}")
+            else:
+                st.warning("No WhatsApp sender is configured yet.")
+            sender_input = st.text_input(
+                "Approved Twilio WhatsApp sender (E.164)",
+                value=effective_sender,
+                placeholder="whatsapp:+14155238886",
+                key="principal_whatsapp_sender",
+                help="Use a sender that is already approved on the college Twilio account.",
+            )
+            sender_save, sender_reset = st.columns(2)
+            if sender_save.button("Save college WhatsApp sender", key="save_whatsapp_sender"):
+                normalized_sender = normalize_whatsapp_sender(sender_input)
+                if not normalized_sender:
+                    st.error("Enter a valid E.164 number, for example whatsapp:+14155238886.")
+                else:
+                    st.session_state.whatsapp_sender_override = normalized_sender
+                    save_data()
+                    st.success(f"College WhatsApp sender saved: {normalized_sender}")
+            if sender_reset.button("Use sender from protected secrets", key="reset_whatsapp_sender"):
+                st.session_state.whatsapp_sender_override = ""
+                save_data()
+                st.success("The sender will now use TWILIO_WHATSAPP_FROM from .streamlit/secrets.toml.")
+                st.rerun()
 
         render_parent_alert_sender(
             st.session_state.attendance_logs, "principal_parent_alert",
