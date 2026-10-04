@@ -1,5 +1,7 @@
-streamlit==1.37.1
-pandas
-numpy
-Pillow
-requests
+# Python 3.14-compatible wheels for Streamlit Community Cloud.
+# Older Pillow 10.x has no Python 3.14 Linux wheel and fails to build there.
+streamlit==1.65.0
+pandas==3.0.6
+numpy==2.5.3
+Pillow==12.3.0
+requests==2.34.2
