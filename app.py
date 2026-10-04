@@ -525,6 +525,20 @@ def enabled_notification_channels(cfg=None):
     return channels
 
 
+def notification_configuration_gaps(cfg=None):
+    """Return the non-secret setting names still needed for each alert channel."""
+    cfg = cfg or get_notification_config()
+    requirements = {
+        "WhatsApp": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"),
+        "SMS": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM"),
+        "Email": ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL"),
+    }
+    return {
+        channel: [setting for setting in settings if not str(cfg.get(setting, "")).strip()]
+        for channel, settings in requirements.items()
+    }
+
+
 def build_absence_notification(student, session):
     return (
         f"Dear Parent,\n\n"
@@ -731,7 +745,23 @@ def render_parent_alert_sender(records, key_prefix, audience_label, show_parent_
             contact_email.info(f"✉️ **Parent email:** {student['parent_email'] or 'Not provided'}")
         available_channels = delivery_channels_for_student(student)
         if not available_channels:
-            st.warning("No sendable channel is available for this record. Add valid provider credentials and a parent mobile number or email address.")
+            st.warning("No sendable channel is available for this record yet.")
+            mobile_is_valid = bool(_normalize_indian_number(student.get("parent_mobile", "")))
+            email_is_valid = "@" in student.get("parent_email", "").strip()
+            if not mobile_is_valid:
+                st.error("This student has no valid parent mobile number. Add a 10-digit Indian number in Student Registry.")
+            if not email_is_valid:
+                st.info("This student has no valid parent email address. Add one in Student Registry if you want email alerts.")
+
+            cfg = get_notification_config()
+            enabled = enabled_notification_channels(cfg)
+            if not enabled:
+                st.info("No alert provider is configured. Add one complete channel in .streamlit/secrets.toml, then restart Streamlit.")
+                for channel, missing_settings in notification_configuration_gaps(cfg).items():
+                    if missing_settings:
+                        st.caption(f"{channel} still needs: {', '.join(missing_settings)}")
+            elif mobile_is_valid or email_is_valid:
+                st.info("A provider is configured, but it does not match this student's saved parent contact details.")
             return
 
         selected_channels = st.multiselect(
