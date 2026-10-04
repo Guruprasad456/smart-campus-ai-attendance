@@ -679,7 +679,7 @@ def alert_context_from_attendance(record):
     return student, session
 
 
-def render_parent_alert_sender(records, key_prefix, audience_label):
+def render_parent_alert_sender(records, key_prefix, audience_label, show_parent_contact=False):
     """Show a manual send/resend control for saved absence records."""
     absences = [record for record in records if record.get("status") == "Absent"]
     absences.sort(key=lambda record: (str(record.get("date", "")), str(record.get("time", ""))), reverse=True)
@@ -694,10 +694,17 @@ def render_parent_alert_sender(records, key_prefix, audience_label):
             format_func=lambda index: (
                 f"{absences[index].get('date', '-')} · {absences[index].get('slot', '-')} · "
                 f"{absences[index].get('name', 'Student')} (Roll {absences[index].get('roll_no', '-')})"
+                + (f" · Parent: {absences[index].get('parent_mobile') or 'No mobile number'}"
+                   if show_parent_contact else "")
             ),
         )
         record = absences[selected_index]
         student, session = alert_context_from_attendance(record)
+        if show_parent_contact:
+            st.caption("Principal-only parent contact preview")
+            contact_mobile, contact_email = st.columns(2)
+            contact_mobile.info(f"📱 **Parent mobile:** {student['parent_mobile'] or 'Not provided'}")
+            contact_email.info(f"✉️ **Parent email:** {student['parent_email'] or 'Not provided'}")
         available_channels = delivery_channels_for_student(student)
         if not available_channels:
             st.warning("No sendable channel is available for this record. Add valid provider credentials and a parent mobile number or email address.")
@@ -1316,7 +1323,8 @@ elif menu == "Principal Admin Panel":
             st.caption("Credentials are never stored with student records. The Notification Log shows every sent or failed alert.")
 
         render_parent_alert_sender(
-            st.session_state.attendance_logs, "principal_parent_alert", "Select any recorded absence to send or resend an alert as Principal."
+            st.session_state.attendance_logs, "principal_parent_alert",
+            "Select any recorded absence to send or resend an alert as Principal.", show_parent_contact=True
         )
 
         if not st.session_state.lecture_logs:
