@@ -66,3 +66,7 @@ The app sends to the stored parent contact only after an authorized Faculty or P
 3. Choose **Create app**, select the GitHub repository, and set the entrypoint to `app.py`.
 
 The hosted version supports Manual Attendance immediately. Face recognition is intentionally optional so a missing native face-recognition library never prevents the application from loading. Streamlit Community Cloud local files may be reset during redeploys, so production cloud storage should use a managed database configured by the college; the included SQLite database is persistent for local/self-hosted use.
+
+## GitHub Pages project site
+
+The repository includes a polished landing page at `docs/index.html`. To publish it on GitHub Pages, open the repository **Settings → Pages**, choose **Deploy from a branch**, and select `master` with the `/docs` folder. This page is the public GitHub project site and includes a **Launch the live app** button. GitHub Pages cannot execute the Python/Streamlit server itself, so attendance features run from the Streamlit Cloud link.

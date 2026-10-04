@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Smart Campus AI Attendance System">
+    <title>Smart Campus AI Attendance</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        color: #102a43;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 8% 8%, #d9f9ff 0, transparent 31%),
+                    radial-gradient(circle at 94% 12%, #f5ddff 0, transparent 35%),
+                    linear-gradient(145deg, #f7fcff, #eef5ff 48%, #fff8ed);
+      }
+      main { width: min(820px, 100%); }
+      .card {
+        overflow: hidden;
+        padding: clamp(30px, 7vw, 64px);
+        border: 1px solid rgba(102, 126, 234, .22);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, .88);
+        box-shadow: 0 24px 70px rgba(45, 75, 150, .16);
+        text-align: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 13px;
+        border-radius: 999px;
+        color: #075d55;
+        background: #d8f9ed;
+        font-size: .88rem;
+        font-weight: 800;
+      }
+      h1 { margin: 20px 0 12px; color: #172554; font-size: clamp(2rem, 6vw, 4rem); letter-spacing: -.055em; }
+      p { max-width: 620px; margin: 0 auto; color: #486581; font-size: clamp(1rem, 2.4vw, 1.2rem); line-height: 1.65; }
+      .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+      a { text-decoration: none; }
+      .primary, .secondary {
+        display: inline-block;
+        padding: 14px 21px;
+        border-radius: 13px;
+        font-weight: 800;
+        transition: transform .18s ease, box-shadow .18s ease;
+      }
+      .primary { color: #fff; background: linear-gradient(110deg, #1677ff, #7b4dff); box-shadow: 0 12px 24px rgba(59, 92, 220, .28); }
+      .secondary { color: #3157a3; border: 1px solid #c9d9fa; background: #f8fbff; }
+      .primary:hover, .secondary:hover { transform: translateY(-2px); }
+      .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin-top: 42px; text-align: left; }
+      .feature { padding: 17px; border-radius: 15px; background: #f5f9ff; color: #31507a; font-size: .93rem; line-height: 1.45; }
+      .feature strong { display: block; margin-bottom: 5px; color: #172554; }
+      footer { margin-top: 20px; color: #61758d; text-align: center; font-size: .85rem; }
+      @media (max-width: 650px) { .features { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <span class="badge">● Official GitHub Pages project site</span>
+        <h1>Smart Campus<br>AI Attendance</h1>
+        <p>Student registration, faculty attendance, parent absence alerts, reports, and principal controls in one smart campus platform.</p>
+        <div class="actions">
+          <a class="primary" href="https://guruprasad456-smart-campus-ai-attendance-app-bfmvl9.streamlit.app">Launch the live app →</a>
+          <a class="secondary" href="https://github.com/Guruprasad456/smart-campus-ai-attendance">View source on GitHub</a>
+        </div>
+        <div class="features">
+          <div class="feature"><strong>Faculty attendance</strong>Record lectures and mark student attendance.</div>
+          <div class="feature"><strong>Parent alerts</strong>Send authorised WhatsApp, SMS, or email absence alerts.</div>
+          <div class="feature"><strong>Principal insights</strong>Review attendance, contacts, notifications, and reports.</div>
+        </div>
+      </section>
+      <footer>Sandipani Technical Campus, Kolpa · Smart Campus AI Suite</footer>
+    </main>
+  </body>
+</html>
