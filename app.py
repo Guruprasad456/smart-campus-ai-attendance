@@ -60,46 +60,126 @@ SLOTS = [
 
 st.markdown("""
 <style>
-    :root { --navy: #0f2b5b; --blue: #2563eb; --sky: #eaf2ff; --ink: #172033; }
-    .stApp {
-        background: radial-gradient(circle at 5% 0%, #eaf2ff 0, transparent 28rem),
-                    linear-gradient(135deg, #f8fbff 0%, #edf4ff 48%, #f8fafc 100%);
-        color: var(--ink);
+    :root {
+        --canvas: #070b18; --surface: #10182b; --surface-2: #151f35;
+        --line: rgba(163, 190, 255, .16); --text: #f4f7ff; --muted: #aebbd6;
+        --blue: #5b8cff; --violet: #9d70ff; --teal: #2dd4bf; --rose: #fb7185;
     }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg, #0c2550 0%, #123a78 100%); }
-    [data-testid="stSidebar"] * { color: #f8fbff; }
-    [data-testid="stSidebar"] [data-baseweb="select"] * { color: #172033; }
-    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.18); }
-    [data-testid="stSidebar"] .stMarkdown p { color: rgba(248,251,255,.82); }
-    .block-container { max-width: 1360px; padding-top: 2.4rem; padding-bottom: 2rem; }
-    @keyframes fadeInDown {
-        from { opacity: 0; transform: translateY(-20px); }
+    html, body, [class*="css"] { font-family: "Segoe UI", Inter, system-ui, sans-serif; }
+    .stApp {
+        background:
+            radial-gradient(circle at 4% 0%, rgba(91,140,255,.20), transparent 29rem),
+            radial-gradient(circle at 96% 8%, rgba(157,112,255,.17), transparent 25rem),
+            linear-gradient(145deg, #070b18 0%, #0b1324 48%, #070b16 100%);
+        color: var(--text);
+    }
+    [data-testid="stHeader"] { background: rgba(7,11,24,.76); border-bottom: 1px solid rgba(163,190,255,.08); }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0c1430 0%, #070b18 100%);
+        border-right: 1px solid rgba(163,190,255,.13);
+    }
+    [data-testid="stSidebar"] > div:first-child { padding-top: .75rem; }
+    [data-testid="stSidebar"] .stMarkdown p,
+    [data-testid="stSidebar"] .stCaption { color: var(--muted); }
+    [data-testid="stSidebar"] hr { border-color: var(--line); margin: 1.2rem 0; }
+    .block-container { max-width: 1500px; padding: 1.45rem 2.15rem 3rem; }
+    h1, h2, h3, h4, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
+        color: var(--text); letter-spacing: -.03em;
+    }
+    p, .stMarkdown p { color: var(--muted); }
+    @keyframes liftIn {
+        from { opacity: 0; transform: translateY(14px); }
         to { opacity: 1; transform: translateY(0); }
     }
-    .animated-header {
-        animation: fadeInDown 0.8s ease-out;
-        background: linear-gradient(120deg, #0c2450 0%, #1d4f9c 56%, #3b82f6 100%);
-        padding: 30px; border-radius: 22px; color: white; text-align: center;
-        box-shadow: 0 16px 38px rgba(24, 65, 134, 0.24);
-        border: 1px solid rgba(255,255,255,.18);
+    .smart-hero {
+        position: relative; overflow: hidden; min-height: 244px; padding: 2.5rem 2.65rem;
+        border-radius: 28px; isolation: isolate; color: #fff;
+        background: linear-gradient(118deg, #152a61 0%, #172c61 45%, #472a7a 100%);
+        border: 1px solid rgba(180,203,255,.28);
+        box-shadow: 0 26px 62px rgba(0,0,0,.30); animation: liftIn .58s ease-out;
     }
-    .animated-header h1 { margin: 0; letter-spacing: -.8px; font-size: clamp(1.75rem, 3vw, 2.5rem); }
-    .animated-header h3 { margin: .6rem 0 0; opacity: .88; font-weight: 500; }
+    .smart-hero:before, .smart-hero:after { content: ""; position: absolute; border-radius: 999px; z-index: -1; }
+    .smart-hero:before { width: 360px; height: 360px; right: -115px; top: -190px; background: rgba(86,226,255,.19); filter: blur(1px); }
+    .smart-hero:after { width: 260px; height: 260px; right: 95px; bottom: -180px; background: rgba(202,130,255,.22); }
+    .hero-kicker { display: flex; align-items: center; gap: .55rem; color: #c7d7ff; font-size: .73rem; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+    .hero-dot { width: .55rem; height: .55rem; border-radius: 50%; background: #55efc4; box-shadow: 0 0 0 5px rgba(85,239,196,.15); }
+    .smart-hero h1 { margin: .78rem 0 .55rem; color: #fff; max-width: 790px; font-size: clamp(2rem, 4vw, 3.55rem); line-height: 1.03; }
+    .smart-hero h1 span { color: #a9c3ff; }
+    .smart-hero p { margin: 0; max-width: 660px; color: #dbe6ff; font-size: 1.03rem; line-height: 1.6; }
+    .hero-pills { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.45rem; }
+    .hero-pill { border: 1px solid rgba(226,235,255,.22); background: rgba(4,12,35,.25); color: #eef4ff; padding: .48rem .72rem; border-radius: 99px; font-size: .78rem; backdrop-filter: blur(8px); }
+    .hero-pill strong { color: #62f2cb; margin-right: .28rem; }
+    .hero-emblem { position: absolute; right: 2.9rem; bottom: 2.2rem; width: 98px; height: 98px; display: grid; place-items: center; border-radius: 27px; background: rgba(7,13,36,.26); border: 1px solid rgba(225,235,255,.22); color: #eaf1ff; font-size: 3.1rem; transform: rotate(-8deg); }
+    .side-brand { padding: .8rem .4rem 1.3rem; }
+    .side-brand .eyebrow { color: #91b2ff; font-size: .67rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    .side-brand h2 { margin: .42rem 0 .35rem; color: #f5f8ff; font-size: 1.35rem; }
+    .side-brand p { margin: 0; font-size: .83rem; color: #aebbd6; line-height: 1.45; }
+    .sidebar-label { color: #7f99d7; font-size: .68rem; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; margin: .35rem 0 .42rem; }
+    .sidebar-status { padding: .95rem; margin-top: 1.25rem; border-radius: 15px; background: rgba(91,140,255,.10); border: 1px solid rgba(123,160,255,.17); }
+    .sidebar-status strong { display:block; color:#e9f0ff; font-size: .86rem; margin-bottom:.24rem; }
+    .sidebar-status span { color:#9fb4e4; font-size:.76rem; }
+    .section-heading { margin: 1.8rem 0 1.05rem; display:flex; align-items: center; gap:.85rem; animation: liftIn .45s ease-out; }
+    .section-icon { display:grid; place-items:center; flex: 0 0 auto; width: 43px; height:43px; border-radius:14px; background:linear-gradient(145deg, rgba(91,140,255,.28), rgba(157,112,255,.22)); border: 1px solid rgba(153,181,255,.25); font-size:1.35rem; }
+    .section-heading .eyebrow { color:#86a8ff; font-size:.66rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+    .section-heading h2 { margin:.15rem 0; font-size:1.5rem; }
+    .section-heading p { margin:0; font-size:.88rem; }
     .metric-card {
-        background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(10px);
-        padding: 22px; min-height: 128px; border-radius: 16px;
-        box-shadow: 0 8px 24px rgba(20, 52, 100, 0.09);
-        border: 1px solid #dbeafe; border-left: 6px solid #2563eb; transition: all 0.3s ease;
+        position:relative; overflow:hidden; min-height: 145px; padding: 1.2rem;
+        border-radius: 20px; background: linear-gradient(145deg, rgba(23,33,57,.94), rgba(13,20,37,.94));
+        border: 1px solid var(--line); box-shadow: 0 12px 26px rgba(0,0,0,.16); transition: all .25s ease;
     }
-    .metric-card h3 { margin: 0; color: #52647e; font-size: .96rem; font-weight: 600; }
-    .metric-card h2 { margin: .55rem 0 0; color: #102b58; font-size: 2rem; }
-    .metric-card:hover { transform: translateY(-6px); box-shadow: 0 16px 30px rgba(20,52,100,.15); }
+    .metric-card:after { content:""; position:absolute; width:100px; height:100px; border-radius:50%; right:-45px; bottom:-52px; background:rgba(110,153,255,.11); }
+    .metric-card:hover { transform: translateY(-5px); border-color: rgba(152,183,255,.35); box-shadow: 0 20px 35px rgba(0,0,0,.25); }
+    .metric-top { display:flex; justify-content:space-between; align-items:center; position:relative; z-index:1; }
+    .metric-icon { display:grid; place-items:center; width:39px; height:39px; border-radius:12px; font-size:1.2rem; }
+    .metric-icon.blue { background:rgba(91,140,255,.18); } .metric-icon.teal { background:rgba(45,212,191,.16); }
+    .metric-icon.violet { background:rgba(157,112,255,.17); } .metric-icon.rose { background:rgba(251,113,133,.16); }
+    .metric-badge { color:#9db5ee; background:rgba(91,140,255,.10); padding:.24rem .45rem; border-radius:99px; font-size:.66rem; font-weight:700; }
+    .metric-card h3 { margin: .95rem 0 0; color: #aebbd6; font-size: .86rem; font-weight: 600; }
+    .metric-card h2 { margin: .2rem 0 0; color: #f6f8ff; font-size: 2rem; line-height:1.15; }
+    .metric-card p { margin:.32rem 0 0; color:#8190b2; font-size:.74rem; }
+    .smart-panel { padding:1.25rem; min-height: 185px; border-radius:20px; background:rgba(16,24,43,.82); border:1px solid var(--line); box-shadow:0 12px 24px rgba(0,0,0,.14); }
+    .panel-kicker { color:#8eacff; font-size:.68rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+    .smart-panel h3 { margin:.42rem 0 .3rem; font-size:1.18rem; }
+    .smart-panel p { margin:.25rem 0; line-height:1.55; }
+    .signal-list { display:grid; gap:.62rem; margin-top:1.05rem; }
+    .signal-row { display:flex; align-items:center; gap:.7rem; padding:.7rem .75rem; border-radius:12px; background:rgba(255,255,255,.035); }
+    .signal-dot { width:.58rem; height:.58rem; border-radius:50%; flex:0 0 auto; }
+    .signal-dot.green { background:#48e0b5; box-shadow:0 0 0 4px rgba(72,224,181,.1); }
+    .signal-dot.amber { background:#f9c74f; box-shadow:0 0 0 4px rgba(249,199,79,.1); }
+    .signal-row strong { display:block; color:#eef3ff; font-size:.83rem; }
+    .signal-row span { display:block; color:#91a1c2; font-size:.73rem; margin-top:.08rem; }
+    .quick-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:.8rem; margin-top:1.1rem; }
+    .quick-card { padding:.9rem; border-radius:14px; background:rgba(255,255,255,.035); border:1px solid rgba(163,190,255,.10); }
+    .quick-card strong { color:#eaf0ff; display:block; font-size:.83rem; margin:.35rem 0; }
+    .quick-card span { color:#92a2c3; font-size:.73rem; line-height:1.4; }
+    [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input,
+    [data-baseweb="select"] > div, [data-testid="stTextArea"] textarea {
+        color: #eef3ff !important; background: rgba(16,24,43,.85) !important;
+        border-color: rgba(163,190,255,.20) !important; border-radius: 11px !important;
+    }
+    [data-baseweb="select"] * { color: #eef3ff !important; }
+    [data-testid="stTextInput"] label, [data-testid="stSelectbox"] label, [data-testid="stDateInput"] label,
+    [data-testid="stFileUploader"] label, [data-testid="stRadio"] label, [data-testid="stMultiSelect"] label { color:#cbd7ef !important; font-weight:600; }
+    div[data-testid="stForm"] { padding:1.35rem; border-radius:20px; border:1px solid var(--line); background:rgba(16,24,43,.70); }
     .stButton > button, .stDownloadButton > button {
-        border-radius: 9px; font-weight: 650; border: 0;
-        box-shadow: 0 4px 10px rgba(37,99,235,.16);
+        min-height:2.65rem; border-radius: 11px; font-weight: 700; letter-spacing:.01em;
+        color:#f7f9ff; border:1px solid rgba(154,183,255,.25); background:linear-gradient(135deg, #4779ed, #7b53d5);
+        box-shadow:0 9px 20px rgba(49,88,193,.22); transition: transform .2s ease, filter .2s ease;
     }
-    div[data-testid="stExpander"] { background: rgba(255,255,255,.76); border: 1px solid #dbeafe; border-radius: 12px; }
-    div[data-testid="stDataFrame"] { border: 1px solid #dbeafe; border-radius: 10px; overflow: hidden; }
+    .stButton > button:hover, .stDownloadButton > button:hover { transform:translateY(-2px); filter:brightness(1.08); }
+    div[data-testid="stExpander"] { background:rgba(16,24,43,.72); border:1px solid var(--line); border-radius:15px; overflow:hidden; }
+    div[data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+    [data-testid="stAlert"] { border-radius:14px; border-width:1px; }
+    [data-testid="stFileUploader"] { border:1px dashed rgba(163,190,255,.24); border-radius:14px; padding:.35rem; background:rgba(16,24,43,.48); }
+    [data-testid="stProgress"] > div > div > div { background: linear-gradient(90deg, #5b8cff, #9d70ff); }
+    .app-footer { margin-top:2.5rem; padding-top:1.1rem; border-top:1px solid var(--line); color:#8090b0; text-align:center; font-size:.8rem; }
+    @media (max-width: 850px) {
+        .block-container { padding:1rem 1rem 2.2rem; }
+        .smart-hero { min-height:0; padding:1.8rem; border-radius:22px; }
+        .hero-emblem { display:none; }
+        .quick-grid { grid-template-columns:1fr; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -308,6 +388,35 @@ def show_df(df):
         st.dataframe(df, width="stretch")
     except TypeError:
         st.dataframe(df, use_container_width=True)
+
+
+def section_heading(icon, eyebrow, title, subtitle):
+    """Reusable visual heading used by each app workspace."""
+    return f"""
+    <div class="section-heading">
+        <div class="section-icon">{icon}</div>
+        <div>
+            <div class="eyebrow">{eyebrow}</div>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
+        </div>
+    </div>
+    """
+
+
+def metric_card(icon, tone, label, value, note, badge):
+    """A small dashboard metric that stays independent from app state."""
+    return f"""
+    <div class="metric-card">
+        <div class="metric-top">
+            <div class="metric-icon {tone}">{icon}</div>
+            <div class="metric-badge">{badge}</div>
+        </div>
+        <h3>{label}</h3>
+        <h2>{value}</h2>
+        <p>{note}</p>
+    </div>
+    """
 
 
 def _load_rgb(img_bytes):
@@ -619,76 +728,122 @@ drain_sms_results()   # move completed notification results into the log
 # ---------------------------------------------------------
 # Header
 # ---------------------------------------------------------
-st.markdown("""
-<div class="animated-header">
-    <h1>🎓 Sandipani Technical Campus, Kolpa</h1>
-    <h3>Smart Campus AI Attendance & Parent Notification System</h3>
-</div>
+hero_date = datetime.now().strftime("%A · %d %b %Y")
+st.markdown(f"""
+<section class="smart-hero">
+    <div class="hero-kicker"><span class="hero-dot"></span> Campus operations hub</div>
+    <h1>Sandipani <span>Smart Campus</span></h1>
+    <p>One connected space for student records, intelligent attendance, parent alerts, and campus operations.</p>
+    <div class="hero-pills">
+        <span class="hero-pill"><strong>● LIVE</strong> System online</span>
+        <span class="hero-pill">⌁ {hero_date}</span>
+        <span class="hero-pill">✦ AI-assisted attendance</span>
+    </div>
+    <div class="hero-emblem">✦</div>
+</section>
 """, unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------
-st.sidebar.header("🧭 Navigation Panel")
-menu = st.sidebar.selectbox("Choose Module:", [
+st.sidebar.markdown("""
+<div class="side-brand">
+    <div class="eyebrow">Sandipani Technical Campus</div>
+    <h2>Campus OS</h2>
+    <p>Attendance, records and parent communication in one secure workspace.</p>
+</div>
+<div class="sidebar-label">Workspace</div>
+""", unsafe_allow_html=True)
+menu = st.sidebar.selectbox("Open workspace", [
     "Dashboard",
     "Student Registration",
     "Faculty Portal & Attendance",
     "Principal Admin Panel",
     "Manage Students",
     "Emergency SOS",
-])
-st.sidebar.markdown("**🕒 College Timetable**")
-st.sidebar.markdown(
-    "- 10:00 – 11:00\n- 11:00 – 12:00\n- ☕ Break 12:00 – 12:45\n- 12:45 – 01:45\n"
-    "- 01:45 – 02:45\n- ☕ Break 02:45 – 03:00\n- 03:00 – 04:00\n- 04:00 – 05:00"
-)
+], label_visibility="collapsed")
+with st.sidebar.expander("🕒 Daily timetable", expanded=False):
+    st.markdown(
+        "10:00 – 11:00  \n11:00 – 12:00  \n☕ Break · 12:00 – 12:45  \n12:45 – 01:45  \n"
+        "01:45 – 02:45  \n☕ Break · 02:45 – 03:00  \n03:00 – 04:00  \n04:00 – 05:00"
+    )
+st.sidebar.markdown("""
+<div class="sidebar-status">
+    <strong>● Operations ready</strong>
+    <span>Local records are stored securely in the campus database.</span>
+</div>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # MODULE 1: Dashboard
 # ---------------------------------------------------------
 if menu == "Dashboard":
-    st.subheader("📊 Campus Real-Time Analytics Overview")
+    st.markdown(section_heading("⌘", "Command center", "Campus pulse, at a glance",
+                                "A clear real-time view of attendance, records, and readiness."), unsafe_allow_html=True)
     today = str(datetime.now().date())
     today_logs = [l for l in st.session_state.attendance_logs if l['date'] == today]
     if today_logs:
         pct = 100 * sum(1 for l in today_logs if l['status'] == "Present") / len(today_logs)
         today_txt = f"{pct:.1f}%"
+        attendance_note = f"{len(today_logs)} attendance record(s) today"
     else:
-        today_txt = "N/A"
+        today_txt = "—"
+        attendance_note = "No attendance submitted today"
 
     lectures_today = sum(1 for l in st.session_state.lecture_logs if l["date"] == today)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(f'<div class="metric-card"><h3>Total Students</h3><h2>{len(st.session_state.students_db)}</h2></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="metric-card"><h3>Registered Faculty</h3><h2>{len(st.session_state.faculty_db)}</h2></div>', unsafe_allow_html=True)
-    c3.markdown(f'<div class="metric-card"><h3>Today Attendance</h3><h2>{today_txt}</h2></div>', unsafe_allow_html=True)
-    c4.markdown(f'<div class="metric-card"><h3>Lectures Today</h3><h2>{lectures_today}</h2></div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.info("Attendance is taken one student at a time. The system compares each camera photo "
-            "with the registered photo, marks a matching student Present, and marks remaining "
-            "students Absent when the session is submitted.")
-
     _channels = enabled_notification_channels()
-    if not _channels:
-        st.warning("Parent notifications are in demo mode. Add WhatsApp (Twilio) or email (SMTP) credentials "
-                   "to Streamlit secrets to send real absence alerts.")
-    else:
-        st.success(f"Active parent notification channel(s): **{', '.join(_channels)}**")
+    c1.markdown(metric_card("👥", "blue", "Student directory", len(st.session_state.students_db),
+                            "Registered student profiles", "RECORDS"), unsafe_allow_html=True)
+    c2.markdown(metric_card("◌", "violet", "Faculty network", len(st.session_state.faculty_db),
+                            "Faculty accounts available", "PEOPLE"), unsafe_allow_html=True)
+    c3.markdown(metric_card("↗", "teal", "Attendance today", today_txt,
+                            attendance_note, "LIVE"), unsafe_allow_html=True)
+    c4.markdown(metric_card("▦", "rose", "Lectures today", lectures_today,
+                            "Completed class sessions", "ACTIVITY"), unsafe_allow_html=True)
 
-    if FACE_LIB:
-        st.success("Face recognition is ready.")
-    else:
-        st.info("Face recognition is not installed. The app remains fully usable with Manual Attendance; "
-                "photo matching is temporarily unavailable.")
+    face_title = "Face AI is ready" if FACE_LIB else "Manual attendance is ready"
+    face_note = ("Camera matching can be used for registered student photos." if FACE_LIB
+                 else "Face matching is optional; use Manual Present for every session.")
+    notification_title = " + ".join(_channels) + " alert channel active" if _channels else "Parent alerts in demo mode"
+    notification_note = ("Absence alerts will be queued after attendance is submitted." if _channels
+                         else "Add WhatsApp or email credentials when the college is ready to send alerts.")
+    recent_text = (f"{lectures_today} lecture session(s) completed today." if lectures_today
+                   else "Start a faculty session to create today's first attendance record.")
+    left_panel, right_panel = st.columns([1.3, 1])
+    with left_panel:
+        st.markdown(f"""
+        <div class="smart-panel">
+            <div class="panel-kicker">Daily workflow</div>
+            <h3>Everything needed for a confident attendance run.</h3>
+            <p>{recent_text}</p>
+            <div class="quick-grid">
+                <div class="quick-card"><div>01 · 🪪</div><strong>Register</strong><span>Add verified student details and parent contacts.</span></div>
+                <div class="quick-card"><div>02 · ◉</div><strong>Mark attendance</strong><span>Use Face AI when available, or the built-in manual flow.</span></div>
+                <div class="quick-card"><div>03 · ✉</div><strong>Notify parents</strong><span>Absent students are logged and alerted through enabled channels.</span></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with right_panel:
+        st.markdown(f"""
+        <div class="smart-panel">
+            <div class="panel-kicker">System signals</div>
+            <h3>Campus services</h3>
+            <div class="signal-list">
+                <div class="signal-row"><i class="signal-dot green"></i><div><strong>{face_title}</strong><span>{face_note}</span></div></div>
+                <div class="signal-row"><i class="signal-dot {'green' if _channels else 'amber'}"></i><div><strong>{notification_title}</strong><span>{notification_note}</span></div></div>
+                <div class="signal-row"><i class="signal-dot green"></i><div><strong>Local storage connected</strong><span>Student and attendance records are available on this device.</span></div></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # MODULE 2: Student Registration
 # ---------------------------------------------------------
 elif menu == "Student Registration":
-    st.subheader("📝 New Student Registration")
+    st.markdown(section_heading("✦", "Student records", "Add a student profile",
+                                "Create a complete record with class placement and parent contact details."), unsafe_allow_html=True)
 
     with st.form("student_reg_form"):
         col_a, col_b = st.columns(2)
@@ -761,7 +916,8 @@ elif menu == "Student Registration":
 # MODULE 3: Faculty Portal & Attendance
 # ---------------------------------------------------------
 elif menu == "Faculty Portal & Attendance":
-    st.subheader("👨‍🏫 Faculty Portal & AI Smart Attendance")
+    st.markdown(section_heading("◉", "Faculty workspace", "Attendance studio",
+                                "Run structured sessions with face-assisted or manual attendance."), unsafe_allow_html=True)
 
     if not st.session_state.get('faculty_logged_in', False):
         f_action = st.radio("Select Action:", ["Faculty Login", "Faculty Registration"])
@@ -1040,7 +1196,8 @@ elif menu == "Faculty Portal & Attendance":
 # MODULE 4: Principal Admin Panel
 # ---------------------------------------------------------
 elif menu == "Principal Admin Panel":
-    st.subheader("🏛️ Principal Admin Panel (All Classes Attendance)")
+    st.markdown(section_heading("⌁", "Leadership workspace", "Campus administration",
+                                "Review attendance activity, reports, and parent notification delivery."), unsafe_allow_html=True)
     admin_pass = st.text_input("Enter Principal Password", type="password")
 
     if admin_pass == principal_password():
@@ -1126,7 +1283,8 @@ elif menu == "Principal Admin Panel":
 # MODULE 5: Manage Students
 # ---------------------------------------------------------
 elif menu == "Manage Students":
-    st.subheader("👨‍🎓 Registered Students")
+    st.markdown(section_heading("▦", "Directory", "Registered students",
+                                "Review the student database and maintain accurate records."), unsafe_allow_html=True)
     if not st.session_state.students_db:
         st.info("No students found.")
     else:
@@ -1154,10 +1312,10 @@ elif menu == "Manage Students":
 # MODULE 6: Emergency SOS
 # ---------------------------------------------------------
 elif menu == "Emergency SOS":
-    st.subheader("🚨 Campus Emergency SOS Alert System")
+    st.markdown(section_heading("!", "Emergency controls", "Campus SOS",
+                                "Use this protected action only to flag a genuine campus emergency."), unsafe_allow_html=True)
     st.warning("Use this button only during an emergency. It records an alert for campus security and the Principal's office.")
     if st.button("🚨 TRIGGER CAMPUS EMERGENCY SOS"):
         st.error("🚨 [CRITICAL ALERT] Emergency SOS Broadcasted to Sandipani Technical Campus Security & Principal Office at Kolpa!")
 
-st.markdown("---")
-st.markdown("<p style='text-align: center; color: #555;'>Sandipani Technical Campus, Kolpa | Smart Campus AI Suite © 2026</p>", unsafe_allow_html=True)
+st.markdown("<div class='app-footer'>Sandipani Technical Campus, Kolpa &nbsp;·&nbsp; Smart Campus AI Suite &nbsp;·&nbsp; © 2026</div>", unsafe_allow_html=True)
