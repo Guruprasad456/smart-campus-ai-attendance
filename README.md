@@ -38,11 +38,24 @@ The local application saves students, faculty, attendance, and notification hist
 When an attendance session is submitted, every student not marked Present is recorded as Absent. The app then queues alerts only for absent students:
 
 - **WhatsApp:** through Twilio's WhatsApp Business API.
+- **SMS text message:** through an SMS-capable Twilio number.
 - **Email:** through your college SMTP account.
 
-Open **Principal Admin Panel → Parent notification status** to see whether the channels are configured. Copy `secrets.example.toml` into either a local `.streamlit/secrets.toml` file or Streamlit Community Cloud **App settings → Secrets**, then replace every placeholder with credentials owned by the college. Do not commit live API keys or email passwords.
+Faculty and Principal can also send or resend one selected absence alert from **Send parent absence alert**. Faculty sees only their own submitted attendance; Principal can select from all saved absences. The delivery status appears in **Parent Notification Log**.
+
+Open **Principal Admin Panel → Parent notification status** to see whether the channels are configured. Copy `secrets.example.toml` into either a local `.streamlit/secrets.toml` file or Streamlit Community Cloud **App settings → Secrets**, then replace every placeholder with credentials owned by the college. Set `TWILIO_SMS_FROM` only when the college has an SMS-capable Twilio number. Do not commit live API keys or email passwords.
 
 Twilio Sandbox/free-form messages work for opted-in recipients and active WhatsApp sessions. Production absence alerts that may be sent outside WhatsApp's 24-hour customer-service window require an approved Twilio/Meta template; set its ID as `TWILIO_CONTENT_SID`. The app supplies variables 1-5: student name, roll number, date, lecture slot, and class.
+
+### Send an absence alert manually
+
+1. Add the Twilio WhatsApp sender, SMS sender, or email settings in `.streamlit/secrets.toml`; use `secrets.example.toml` as the template.
+2. Register the student with a valid parent mobile number for WhatsApp/SMS and/or a parent email address for email.
+3. Submit attendance. Students who were not marked Present are saved as Absent.
+4. A Faculty member opens **Faculty & attendance → Send parent absence alert** to send an alert for one of their own absence records. A Principal opens **Principal controls → Send parent absence alert** to send or resend an alert for any saved absence.
+5. Choose the student, choose one or more available channels, then click **Send parent alert now**. Open **Parent Notification Log** to review the result.
+
+The app sends to the stored parent contact only after an authorized Faculty or Principal clicks the send button. Do not add provider credentials until the college is authorized to notify parents.
 
 ## Free deployment
 

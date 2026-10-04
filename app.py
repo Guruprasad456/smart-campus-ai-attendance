@@ -460,7 +460,7 @@ def get_single_face_encoding(img_bytes):
 
 
 # ---------------------------------------------------------
-# Parent notification engine: WhatsApp through Twilio and email through SMTP.
+# Parent notification engine: WhatsApp/SMS through Twilio and email through SMTP.
 # No messages are sent unless the corresponding credentials are configured.
 # ---------------------------------------------------------
 @st.cache_resource
@@ -470,7 +470,7 @@ def notification_runtime():
 
 
 NOTIFICATION_KEYS = [
-    "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM",
+    "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM", "TWILIO_SMS_FROM",
     "TWILIO_CONTENT_SID",
     "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "SMTP_USE_SSL",
 ]
@@ -499,6 +499,8 @@ def enabled_notification_channels(cfg=None):
     channels = []
     if all(cfg[key].strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM")):
         channels.append("WhatsApp")
+    if all(cfg[key].strip() for key in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM")):
+        channels.append("SMS")
     if all(cfg[key].strip() for key in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL")):
         channels.append("Email")
     return channels
@@ -537,7 +539,7 @@ def _normalize_indian_number(mobile):
 
 
 def _deliver_notification(channel, recipient, message, student_name, kind, cfg, template_variables=None):
-    """Deliver one WhatsApp or email notification in a background worker."""
+    """Deliver one WhatsApp, SMS, or email notification in a background worker."""
     status = "Failed"
     try:
         if channel == "WhatsApp":
@@ -562,6 +564,18 @@ def _deliver_notification(channel, recipient, message, student_name, kind, cfg, 
             )
             if response.ok:
                 status = "Queued with WhatsApp"
+            else:
+                status = f"Failed ({response.status_code}: {response.text[:120]})"
+        elif channel == "SMS":
+            import requests
+            target = _normalize_indian_number(recipient)
+            response = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{cfg['TWILIO_ACCOUNT_SID']}/Messages.json",
+                auth=(cfg["TWILIO_ACCOUNT_SID"], cfg["TWILIO_AUTH_TOKEN"]),
+                data={"From": cfg["TWILIO_SMS_FROM"].strip(), "To": target, "Body": message}, timeout=20,
+            )
+            if response.ok:
+                status = "Queued with SMS"
             else:
                 status = f"Failed ({response.status_code}: {response.text[:120]})"
         elif channel == "Email":
@@ -590,15 +604,26 @@ def _deliver_notification(channel, recipient, message, student_name, kind, cfg, 
     return _record_notification(channel, recipient, student_name, kind, message, status)
 
 
-def queue_absence_notifications(student, session):
-    """Queue absence alerts only. Returns background worker futures."""
+def delivery_channels_for_student(student, cfg=None):
+    """Return configured channels that have a valid parent recipient for this student."""
+    enabled = enabled_notification_channels(cfg)
+    mobile_is_valid = bool(_normalize_indian_number(student.get("parent_mobile", "")))
+    email_is_valid = "@" in student.get("parent_email", "").strip()
+    return [channel for channel in enabled if (channel in ("WhatsApp", "SMS") and mobile_is_valid)
+            or (channel == "Email" and email_is_valid)]
+
+
+def queue_absence_notifications(student, session, requested_channels=None):
+    """Queue an absence alert through all configured or explicitly selected channels."""
     cfg = get_notification_config()
     message = build_absence_notification(student, session)
-    channels = enabled_notification_channels(cfg)
+    available_channels = enabled_notification_channels(cfg)
+    selected = set(available_channels if requested_channels is None else requested_channels)
+    channels = [channel for channel in available_channels if channel in selected]
     futures = []
     if not channels:
         _record_notification("Not configured", "", student["name"], "Absent", message,
-                             "Not sent: configure WhatsApp or email credentials")
+                             "Not sent: choose a configured WhatsApp, SMS, or email channel")
         return futures
 
     runtime = notification_runtime()
@@ -614,6 +639,14 @@ def queue_absence_notifications(student, session):
         else:
             _record_notification("WhatsApp", mobile, student["name"], "Absent", message,
                                  "Skipped: parent mobile number is missing or invalid")
+    if "SMS" in channels:
+        mobile = student.get("parent_mobile", "")
+        if _normalize_indian_number(mobile):
+            futures.append(runtime["pool"].submit(
+                _deliver_notification, "SMS", mobile, message, student["name"], "Absent", cfg))
+        else:
+            _record_notification("SMS", mobile, student["name"], "Absent", message,
+                                 "Skipped: parent mobile number is missing or invalid")
     if "Email" in channels:
         email = student.get("parent_email", "").strip()
         if "@" in email:
@@ -623,6 +656,67 @@ def queue_absence_notifications(student, session):
             _record_notification("Email", email, student["name"], "Absent", message,
                                  "Skipped: parent email address is missing or invalid")
     return futures
+
+
+def alert_context_from_attendance(record):
+    """Turn a saved absence record into notification-ready student and session data."""
+    student = {
+        "name": record.get("name", "Student"), "roll_no": record.get("roll_no", "-"),
+        "parent_mobile": record.get("parent_mobile", ""),
+        "parent_email": record.get("parent_email", ""),
+    }
+    session = {
+        "department": record.get("department", "-"), "class_name": record.get("class_name", "-"),
+        "division": record.get("division", "-"), "slot": record.get("slot", "-"),
+        "date": record.get("date", "-"),
+    }
+    return student, session
+
+
+def render_parent_alert_sender(records, key_prefix, audience_label):
+    """Show a manual send/resend control for saved absence records."""
+    absences = [record for record in records if record.get("status") == "Absent"]
+    absences.sort(key=lambda record: (str(record.get("date", "")), str(record.get("time", ""))), reverse=True)
+    with st.expander("📤 Send parent absence alert", expanded=False):
+        st.caption(audience_label)
+        if not absences:
+            st.info("No absent-student records are available to alert.")
+            return
+
+        selected_index = st.selectbox(
+            "Absent student", range(len(absences)), key=f"{key_prefix}_record",
+            format_func=lambda index: (
+                f"{absences[index].get('date', '-')} · {absences[index].get('slot', '-')} · "
+                f"{absences[index].get('name', 'Student')} (Roll {absences[index].get('roll_no', '-')})"
+            ),
+        )
+        record = absences[selected_index]
+        student, session = alert_context_from_attendance(record)
+        available_channels = delivery_channels_for_student(student)
+        if not available_channels:
+            st.warning("No sendable channel is available for this record. Add valid provider credentials and a parent mobile number or email address.")
+            return
+
+        selected_channels = st.multiselect(
+            "Send using", available_channels, default=available_channels, key=f"{key_prefix}_channels",
+        )
+        st.caption("This action sends a real message to the selected student's parent. The delivery result is saved in Parent Notification Log.")
+        if st.button("Send parent alert now", key=f"{key_prefix}_send", type="primary"):
+            if not selected_channels:
+                st.warning("Select at least one delivery channel.")
+                return
+            with st.spinner("Sending absence alert to the parent..."):
+                futures = queue_absence_notifications(student, session, selected_channels)
+                if futures:
+                    wait(futures, timeout=45)
+            statuses = [future.result() for future in futures if future.done()]
+            drain_sms_results()
+            if any(status.startswith("Failed") for status in statuses):
+                st.error("One or more alerts could not be delivered. Open Parent Notification Log for details.")
+            elif statuses:
+                st.success("Parent alert queued successfully. Check Parent Notification Log for the delivery status.")
+            else:
+                st.warning("No alert was queued. Check the parent contact details and notification configuration.")
 
 
 def retry_notification(entry):
@@ -1144,6 +1238,11 @@ elif menu == "Faculty Portal & Attendance":
         # B) NO SESSION -> history + start new session
         # =====================================================
         else:
+            faculty_absences = [record for record in st.session_state.attendance_logs
+                                if record.get("faculty") == fac_name and record.get("status") == "Absent"]
+            render_parent_alert_sender(
+                faculty_absences, "faculty_parent_alert", "Only absence records submitted under your faculty account are shown here."
+            )
             st.markdown("### 📚 Your lecture history")
             my_lectures = [l for l in st.session_state.lecture_logs if l['faculty'] == fac_name]
             if not my_lectures:
@@ -1207,8 +1306,12 @@ elif menu == "Principal Admin Panel":
                 st.success(f"Configured channel(s): {', '.join(active_channels)}")
             else:
                 st.info("No live notification channel is configured yet. Attendance is still saved safely in the local database.")
-            st.write("To enable real WhatsApp or email alerts, copy `secrets.example.toml` to `.streamlit/secrets.toml` and add the college's provider credentials.")
+            st.write("To enable real WhatsApp, SMS, or email alerts, copy `secrets.example.toml` to `.streamlit/secrets.toml` and add the college's provider credentials.")
             st.caption("Credentials are never stored with student records. The Notification Log shows every sent or failed alert.")
+
+        render_parent_alert_sender(
+            st.session_state.attendance_logs, "principal_parent_alert", "Select any recorded absence to send or resend an alert as Principal."
+        )
 
         if not st.session_state.lecture_logs:
             st.warning("No faculty attendance has been recorded yet.")
